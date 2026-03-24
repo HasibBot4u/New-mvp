@@ -1,0 +1,239 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "avatar": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin", "super_admin"] },
+        "is_active": { "type": "boolean" },
+        "locale": { "type": "string" },
+        "theme": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "Course": {
+      "title": "Course",
+      "description": "Course details",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "description": { "type": "string" },
+        "short_description": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "price": { "type": "number" },
+        "original_price": { "type": "number" },
+        "level": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "published", "archived"] },
+        "enrollment_duration_days": { "type": "number" },
+        "total_lessons": { "type": "number" },
+        "enrolled_count": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "slug", "status"]
+    },
+    "Chapter": {
+      "title": "Chapter",
+      "description": "Course chapter",
+      "type": "object",
+      "properties": {
+        "course_id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "sort_order": { "type": "number" },
+        "is_visible": { "type": "boolean" }
+      },
+      "required": ["course_id", "title"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Lesson within a chapter",
+      "type": "object",
+      "properties": {
+        "chapter_id": { "type": "string" },
+        "course_id": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string", "enum": ["video", "text", "pdf", "quiz", "live"] },
+        "video_type": { "type": "string" },
+        "video_external_id": { "type": "string" },
+        "video_hls_url": { "type": "string" },
+        "video_duration_seconds": { "type": "number" },
+        "content": { "type": "string" },
+        "sort_order": { "type": "number" },
+        "is_visible": { "type": "boolean" },
+        "is_free_preview": { "type": "boolean" }
+      },
+      "required": ["chapter_id", "course_id", "title", "type"]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "Student enrollment in a course",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "course_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "expired", "cancelled", "suspended"] },
+        "enrolled_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user_id", "course_id", "status", "enrolled_at"]
+    },
+    "LessonProgress": {
+      "title": "Lesson Progress",
+      "description": "Student progress in a lesson",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "lesson_id": { "type": "string" },
+        "course_id": { "type": "string" },
+        "is_completed": { "type": "boolean" },
+        "completed_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user_id", "lesson_id", "course_id", "is_completed"]
+    },
+    "Quiz": {
+      "title": "Quiz",
+      "description": "Quiz details",
+      "type": "object",
+      "properties": {
+        "course_id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "time_limit_minutes": { "type": "number" },
+        "total_marks": { "type": "number" },
+        "pass_marks": { "type": "number" },
+        "negative_per_wrong": { "type": "number" },
+        "max_attempts": { "type": "number" },
+        "is_published": { "type": "boolean" },
+        "sort_order": { "type": "number" }
+      },
+      "required": ["course_id", "title"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Quiz question",
+      "type": "object",
+      "properties": {
+        "quiz_id": { "type": "string" },
+        "question_text": { "type": "string" },
+        "question_image": { "type": "string" },
+        "marks_correct": { "type": "number" },
+        "marks_wrong": { "type": "number" },
+        "explanation": { "type": "string" },
+        "sort_order": { "type": "number" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "option_label": { "type": "string" },
+              "option_text": { "type": "string" },
+              "is_correct": { "type": "boolean" }
+            }
+          }
+        }
+      },
+      "required": ["quiz_id", "question_text", "options"]
+    },
+    "QuizAttempt": {
+      "title": "Quiz Attempt",
+      "description": "Student attempt at a quiz",
+      "type": "object",
+      "properties": {
+        "quiz_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["in_progress", "submitted", "timed_out"] },
+        "started_at": { "type": "string", "format": "date-time" },
+        "submitted_at": { "type": "string", "format": "date-time" },
+        "score": { "type": "number" },
+        "total_marks": { "type": "number" },
+        "correct_count": { "type": "number" },
+        "wrong_count": { "type": "number" },
+        "skipped_count": { "type": "number" },
+        "time_taken_seconds": { "type": "number" },
+        "rank": { "type": "number" }
+      },
+      "required": ["quiz_id", "user_id", "status", "started_at"]
+    },
+    "QuizAnswer": {
+      "title": "Quiz Answer",
+      "description": "Student answer to a question",
+      "type": "object",
+      "properties": {
+        "attempt_id": { "type": "string" },
+        "question_id": { "type": "string" },
+        "selected_option_id": { "type": "string" },
+        "is_marked_for_review": { "type": "boolean" },
+        "answered_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["attempt_id", "question_id"]
+    },
+    "ImageGenerationRequest": {
+      "title": "Image Generation Request",
+      "description": "Request for image generation using Gemini",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "prompt": { "type": "string" },
+        "size": { "type": "string", "enum": ["1K", "2K", "4K"] },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "image_url": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user_id", "prompt", "size", "status"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "courses": {
+      "schema": { "$ref": "#/entities/Course" },
+      "description": "Courses"
+    },
+    "chapters": {
+      "schema": { "$ref": "#/entities/Chapter" },
+      "description": "Chapters"
+    },
+    "lessons": {
+      "schema": { "$ref": "#/entities/Lesson" },
+      "description": "Lessons"
+    },
+    "enrollments": {
+      "schema": { "$ref": "#/entities/Enrollment" },
+      "description": "Enrollments"
+    },
+    "lesson_progress": {
+      "schema": { "$ref": "#/entities/LessonProgress" },
+      "description": "Lesson Progress"
+    },
+    "quizzes": {
+      "schema": { "$ref": "#/entities/Quiz" },
+      "description": "Quizzes"
+    },
+    "questions": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "Questions"
+    },
+    "quiz_attempts": {
+      "schema": { "$ref": "#/entities/QuizAttempt" },
+      "description": "Quiz Attempts"
+    },
+    "quiz_attempts/{attemptId}/answers": {
+      "schema": { "$ref": "#/entities/QuizAnswer" },
+      "description": "Quiz Answers"
+    },
+    "image_generations": {
+      "schema": { "$ref": "#/entities/ImageGenerationRequest" },
+      "description": "Image Generation Requests"
+    }
+  }
+}

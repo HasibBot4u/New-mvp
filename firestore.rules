@@ -1,0 +1,155 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.user_id;
+    }
+    
+    function uidUnchanged() {
+      return !('user_id' in request.resource.data) || request.resource.data.user_id == request.auth.uid;
+    }
+    
+    function uidNotModified() {
+      return !('user_id' in request.resource.data) || request.resource.data.user_id == resource.data.user_id;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+    
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserRole() == 'admin' || 
+        getUserRole() == 'super_admin' || 
+        (request.auth.token.email == "mdhosainp414@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isTeacher() {
+      return isAuthenticated() && (
+        getUserRole() == 'teacher' || isAdmin()
+      );
+    }
+    
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    
+    function isValidUser(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 191 &&
+             data.role in ['student', 'teacher', 'admin', 'super_admin'];
+    }
+    
+    function isValidCourse(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() < 220 &&
+             data.status in ['draft', 'published', 'archived'];
+    }
+
+    function isValidEnrollment(data) {
+      return data.user_id is string && data.course_id is string &&
+             data.status in ['active', 'expired', 'cancelled', 'suspended'];
+    }
+
+    function isEnrolled(courseId) {
+      let enrollment = get(/databases/$(database)/documents/enrollments/$(request.auth.uid + '_' + courseId));
+      return enrollment != null && enrollment.data.status == 'active';
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+                    ((request.resource.data.role == 'student') || isAdmin());
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && 
+                    ((request.resource.data.role == resource.data.role) || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    match /courses/{courseId} {
+      allow read: if resource.data.status == 'published' || isTeacher();
+      allow create: if isTeacher() && isValidCourse(request.resource.data);
+      allow update: if isTeacher() && isValidCourse(request.resource.data);
+      allow delete: if isAdmin();
+    }
+    
+    match /chapters/{chapterId} {
+      allow read: if true; // Publicly visible structure
+      allow create, update, delete: if isTeacher();
+    }
+    
+    match /lessons/{lessonId} {
+      allow read: if isTeacher() || (isAuthenticated() && isEnrolled(resource.data.course_id));
+      allow create, update, delete: if isTeacher();
+    }
+    
+    match /enrollments/{enrollmentId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAdmin() && isValidEnrollment(request.resource.data);
+      allow update: if isAdmin() && isValidEnrollment(request.resource.data);
+      allow delete: if isAdmin();
+    }
+    
+    match /lesson_progress/{progressId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create, update: if isDocOwner() && uidUnchanged() && uidNotModified();
+      allow delete: if isAdmin();
+    }
+    
+    match /quizzes/{quizId} {
+      allow read: if resource.data.is_published == true || isTeacher();
+      allow create, update, delete: if isTeacher();
+    }
+    
+    match /questions/{questionId} {
+      allow read: if isTeacher() || (isAuthenticated() && isEnrolled(get(/databases/$(database)/documents/quizzes/$(resource.data.quiz_id)).data.course_id));
+      allow create, update, delete: if isTeacher();
+    }
+    
+    match /quiz_attempts/{attemptId} {
+      allow read: if isDocOwner() || isTeacher();
+      allow create: if isDocOwner() && uidUnchanged() && request.resource.data.status in ['in_progress', 'submitted', 'timed_out'];
+      allow update: if isDocOwner() && uidNotModified() && request.resource.data.status in ['in_progress', 'submitted', 'timed_out'];
+      allow delete: if isAdmin();
+      
+      match /answers/{answerId} {
+        allow read: if isDocOwner() || isTeacher();
+        allow create, update: if isDocOwner();
+        allow delete: if isAdmin();
+      }
+    }
+
+    match /image_generations/{genId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isDocOwner() && uidUnchanged() && request.resource.data.status in ['pending', 'completed', 'failed'] && request.resource.data.size in ['1K', '2K', '4K'];
+      allow update: if isDocOwner() && uidNotModified() && request.resource.data.status in ['pending', 'completed', 'failed'];
+      allow delete: if isAdmin();
+    }
+  }
+}
