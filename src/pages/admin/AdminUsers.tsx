@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Profile } from '../../types';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Search, MoreVertical } from 'lucide-react';
+import { Search } from 'lucide-react';
 
 export const AdminUsers: React.FC = () => {
   const [users, setUsers] = useState<Profile[]>([]);
@@ -31,9 +31,26 @@ export const AdminUsers: React.FC = () => {
   }, []);
 
   const filteredUsers = users.filter(user => 
-    user.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const toggleRole = async (userId: string, currentRole: string) => {
+    const newRole = currentRole === 'admin' ? 'user' : 'admin';
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role: newRole })
+        .eq('id', userId);
+
+      if (error) throw error;
+      
+      setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+    } catch (error) {
+      console.error('Error updating role:', error);
+      alert('Failed to update user role');
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -81,7 +98,7 @@ export const AdminUsers: React.FC = () => {
                 filteredUsers.map((user) => (
                   <tr key={user.id} className="border-b border-border hover:bg-surface/50">
                     <td className="px-6 py-4">
-                      <div className="font-medium text-text-primary">{user.full_name || 'Unknown User'}</div>
+                      <div className="font-medium text-text-primary">{user.display_name || 'Unknown User'}</div>
                       <div className="text-xs text-text-muted font-mono mt-0.5">{user.id}</div>
                     </td>
                     <td className="px-6 py-4">
@@ -93,8 +110,13 @@ export const AdminUsers: React.FC = () => {
                       {new Date(user.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                        <MoreVertical size={16} />
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={() => toggleRole(user.id, user.role)}
+                        className="text-xs"
+                      >
+                        Make {user.role === 'admin' ? 'User' : 'Admin'}
                       </Button>
                     </td>
                   </tr>

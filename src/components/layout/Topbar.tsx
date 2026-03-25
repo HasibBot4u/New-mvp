@@ -41,7 +41,7 @@ export const Topbar: React.FC = () => {
               <div className="flex items-center gap-3 border-l border-border pl-4">
                 <div className="hidden sm:flex flex-col items-end">
                   <span className="text-sm font-medium text-text-primary">
-                    {profile?.full_name || user.email}
+                    {profile?.display_name || user.email}
                   </span>
                   <span className="text-xs text-text-secondary capitalize">
                     {profile?.role || 'User'}

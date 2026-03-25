@@ -15,16 +15,16 @@ export const VideoListPage: React.FC = () => {
   }, [catalog, subjectId]);
 
   const cycle = useMemo(() => {
-    return catalog?.cycles.find((c) => c.id === cycleId);
-  }, [catalog, cycleId]);
+    return subject?.cycles.find((c) => c.id === cycleId);
+  }, [subject, cycleId]);
 
   const chapter = useMemo(() => {
-    return catalog?.chapters.find((c) => c.id === chapterId);
-  }, [catalog, chapterId]);
+    return cycle?.chapters.find((c) => c.id === chapterId);
+  }, [cycle, chapterId]);
 
   const videos = useMemo(() => {
-    return catalog?.videos.filter((v) => v.chapter_id === chapterId).sort((a, b) => a.order_index - b.order_index) || [];
-  }, [catalog, chapterId]);
+    return chapter?.videos || [];
+  }, [chapter]);
 
   if (isLoading) {
     return (
@@ -43,14 +43,6 @@ export const VideoListPage: React.FC = () => {
   if (!subject || !cycle || !chapter) {
     return <Navigate to="/" replace />;
   }
-
-  const formatDuration = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
 
   return (
     <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
@@ -91,22 +83,17 @@ export const VideoListPage: React.FC = () => {
                 <h3 className="truncate text-base font-medium text-text-primary group-hover:text-primary transition-colors">
                   {video.title}
                 </h3>
-                {video.description && (
-                  <p className="truncate text-sm text-text-secondary">
-                    {video.description}
-                  </p>
-                )}
               </div>
 
               <div className="flex items-center gap-4 shrink-0">
                 {video.duration && (
                   <div className="hidden sm:flex items-center text-xs text-text-secondary">
                     <Clock size={14} className="mr-1" />
-                    {formatDuration(video.duration)}
+                    {video.duration}
                   </div>
                 )}
                 <Badge variant="outline" className="hidden sm:inline-flex">
-                  Part {video.order_index}
+                  Part {video.display_order}
                 </Badge>
               </div>
             </Link>

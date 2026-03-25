@@ -49,10 +49,12 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const totalCycles = catalog?.subjects.reduce((acc, s) => acc + s.cycles.length, 0) || 0;
+
   const statCards = [
     { label: 'Total Subjects', value: catalog?.subjects.length || 0, icon: BookOpen, color: 'text-blue-500', bg: 'bg-blue-50' },
-    { label: 'Total Cycles', value: catalog?.cycles.length || 0, icon: Layers, color: 'text-indigo-500', bg: 'bg-indigo-50' },
-    { label: 'Total Videos', value: catalog?.videos.length || 0, icon: Video, color: 'text-purple-500', bg: 'bg-purple-50' },
+    { label: 'Total Cycles', value: totalCycles, icon: Layers, color: 'text-indigo-500', bg: 'bg-indigo-50' },
+    { label: 'Total Videos', value: catalog?.total_videos || 0, icon: Video, color: 'text-purple-500', bg: 'bg-purple-50' },
     { label: 'Total Users', value: stats.totalUsers, icon: Users, color: 'text-green-500', bg: 'bg-green-50' },
   ];
 

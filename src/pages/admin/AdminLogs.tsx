@@ -8,11 +8,9 @@ interface ActivityLog {
   id: string;
   user_id: string;
   action: string;
-  entity_type: string;
-  entity_id: string;
-  metadata: any;
+  details: any;
   created_at: string;
-  profiles?: { full_name: string };
+  profiles?: { display_name: string };
 }
 
 export const AdminLogs: React.FC = () => {
@@ -27,7 +25,7 @@ export const AdminLogs: React.FC = () => {
           .from('activity_logs')
           .select(`
             *,
-            profiles:user_id (full_name)
+            profiles:user_id (display_name)
           `)
           .order('created_at', { ascending: false })
           .limit(100);
@@ -51,6 +49,15 @@ export const AdminLogs: React.FC = () => {
     if (action.includes('update')) return 'warning';
     return 'default';
   };
+
+  const filteredLogs = logs.filter(log => {
+    const searchLower = searchQuery.toLowerCase();
+    return (
+      log.action.toLowerCase().includes(searchLower) ||
+      log.profiles?.display_name?.toLowerCase().includes(searchLower) ||
+      JSON.stringify(log.details).toLowerCase().includes(searchLower)
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -86,38 +93,34 @@ export const AdminLogs: React.FC = () => {
                 <th className="px-6 py-3">Timestamp</th>
                 <th className="px-6 py-3">User</th>
                 <th className="px-6 py-3">Action</th>
-                <th className="px-6 py-3">Entity</th>
                 <th className="px-6 py-3">Details</th>
               </tr>
             </thead>
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center">Loading logs...</td>
+                  <td colSpan={4} className="px-6 py-8 text-center">Loading logs...</td>
                 </tr>
-              ) : logs.length === 0 ? (
+              ) : filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center">No activity found</td>
+                  <td colSpan={4} className="px-6 py-8 text-center">No activity found matching search</td>
                 </tr>
               ) : (
-                logs.map((log) => (
+                filteredLogs.map((log) => (
                   <tr key={log.id} className="border-b border-border hover:bg-surface/50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       {new Date(log.created_at).toLocaleString()}
                     </td>
                     <td className="px-6 py-4 font-medium text-text-primary">
-                      {log.profiles?.full_name || 'Unknown'}
+                      {log.profiles?.display_name || 'Unknown'}
                     </td>
                     <td className="px-6 py-4">
                       <Badge variant={getActionColor(log.action) as any}>
                         {log.action}
                       </Badge>
                     </td>
-                    <td className="px-6 py-4 capitalize">
-                      {log.entity_type}
-                    </td>
                     <td className="px-6 py-4 text-xs font-mono text-text-muted truncate max-w-xs">
-                      {JSON.stringify(log.metadata)}
+                      {JSON.stringify(log.details)}
                     </td>
                   </tr>
                 ))

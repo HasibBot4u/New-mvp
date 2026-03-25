@@ -9,7 +9,12 @@ export default {
           DEFAULT: '#1A237E',
           light: '#1565C0',
           lighter: '#1976D2',
-          pale: '#E8EAF6'
+          pale: '#E8EAF6',
+          hover: '#1565C0'
+        },
+        secondary: {
+          DEFAULT: '#E8EAF6',
+          hover: '#C5CAE9'
         },
         accent: {
           DEFAULT: '#E53935',
@@ -22,6 +27,17 @@ export default {
         warning: {
           DEFAULT: '#E65100',
           light: '#FFF3E0'
+        },
+        background: '#F5F7FA',
+        surface: {
+          DEFAULT: '#FFFFFF',
+          hover: '#EEF2FF'
+        },
+        border: '#E0E7EF',
+        text: {
+          primary: '#0D1B2A',
+          secondary: '#546E7A',
+          muted: '#94A3B8'
         },
         brand: {
           bg: '#F5F7FA',

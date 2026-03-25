@@ -2,6 +2,7 @@
 
 export interface Video {
   id: string;
+  chapter_id: string;
   title: string;
   display_order: number;
   telegram_file_id: string;
@@ -14,6 +15,7 @@ export interface Video {
 
 export interface Chapter {
   id: string;
+  cycle_id: string;
   name: string;
   display_order: number;
   is_active: boolean;
@@ -22,6 +24,7 @@ export interface Chapter {
 
 export interface Cycle {
   id: string;
+  subject_id: string;
   name: string;
   display_order: number;
   telegram_channel_id: string;
@@ -52,4 +55,8 @@ export interface Profile {
   role: 'user' | 'admin';
   is_blocked: boolean;
   is_restricted: boolean;
+  last_active_at?: string;
+  total_watch_time_minutes?: number;
+  videos_watched_count?: number;
+  created_at: string;
 }

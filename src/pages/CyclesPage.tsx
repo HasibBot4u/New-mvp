@@ -14,8 +14,8 @@ export const CyclesPage: React.FC = () => {
   }, [catalog, subjectId]);
 
   const cycles = useMemo(() => {
-    return catalog?.cycles.filter((c) => c.subject_id === subjectId).sort((a, b) => a.order_index - b.order_index) || [];
-  }, [catalog, subjectId]);
+    return subject?.cycles || [];
+  }, [subject]);
 
   if (isLoading) {
     return (
@@ -70,14 +70,9 @@ export const CyclesPage: React.FC = () => {
                     {cycle.name}
                   </h2>
                   <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                    {cycle.order_index}
+                    {cycle.display_order}
                   </span>
                 </div>
-                {cycle.description && (
-                  <p className="text-sm text-text-secondary line-clamp-2">
-                    {cycle.description}
-                  </p>
-                )}
               </div>
               <div className="mt-4 flex items-center text-sm font-medium text-primary">
                 View Chapters &rarr;

@@ -14,12 +14,12 @@ export const ChaptersPage: React.FC = () => {
   }, [catalog, subjectId]);
 
   const cycle = useMemo(() => {
-    return catalog?.cycles.find((c) => c.id === cycleId);
-  }, [catalog, cycleId]);
+    return subject?.cycles.find((c) => c.id === cycleId);
+  }, [subject, cycleId]);
 
   const chapters = useMemo(() => {
-    return catalog?.chapters.filter((c) => c.cycle_id === cycleId).sort((a, b) => a.order_index - b.order_index) || [];
-  }, [catalog, cycleId]);
+    return cycle?.chapters || [];
+  }, [cycle]);
 
   if (isLoading) {
     return (
@@ -76,13 +76,8 @@ export const ChaptersPage: React.FC = () => {
                 <h2 className="text-lg font-semibold text-text-primary group-hover:text-primary transition-colors">
                   {chapter.name}
                 </h2>
-                {chapter.description && (
-                  <p className="mt-1 text-sm text-text-secondary line-clamp-2">
-                    {chapter.description}
-                  </p>
-                )}
                 <div className="mt-2 text-xs font-medium text-text-muted">
-                  Chapter {chapter.order_index}
+                  Chapter {chapter.display_order}
                 </div>
               </div>
             </Link>
