@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 
 export const LoginPage: React.FC = () => {
+  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -16,21 +17,41 @@ export const LoginPage: React.FC = () => {
     return <Navigate to="/" replace />;
   }
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const isConfigured = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_URL !== 'your_supabase_project_url';
+
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!isConfigured) {
+      setError('Supabase is not configured. Please set the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.');
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) throw error;
-      navigate('/');
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+        if (error) throw error;
+        setError('Check your email for the confirmation link.');
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+        navigate('/');
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to log in');
+      if (err.message === 'Failed to fetch') {
+        setError('Network error: Failed to connect to Supabase. Please check your internet connection or verify that your Supabase project is active and the URL is correct.');
+      } else {
+        setError(err.message || `Failed to ${isSignUp ? 'sign up' : 'log in'}`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -44,16 +65,22 @@ export const LoginPage: React.FC = () => {
             N
           </div>
           <h2 className="mt-6 text-3xl font-bold tracking-tight text-text-primary">
-            Welcome back
+            {isSignUp ? 'Create an account' : 'Welcome back'}
           </h2>
           <p className="mt-2 text-sm text-text-secondary">
-            Sign in to your NexusEdu account
+            {isSignUp ? 'Sign up for NexusEdu' : 'Sign in to your NexusEdu account'}
           </p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleLogin}>
+        {!isConfigured && (
+          <div className="rounded-md bg-yellow-50 p-4 text-sm text-yellow-800 border border-yellow-200">
+            <strong>Configuration Missing:</strong> You need to set your Supabase environment variables in the settings menu before you can sign in.
+          </div>
+        )}
+
+        <form className="mt-8 space-y-6" onSubmit={handleAuth}>
           {error && (
-            <div className="rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200">
+            <div className={`rounded-md p-4 text-sm border ${error.includes('Check your email') ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
               {error}
             </div>
           )}
@@ -87,9 +114,22 @@ export const LoginPage: React.FC = () => {
             </div>
           </div>
 
-          <Button type="submit" className="w-full" isLoading={isLoading}>
-            Sign in
+          <Button type="submit" className="w-full" isLoading={isLoading} disabled={!isConfigured}>
+            {isSignUp ? 'Sign up' : 'Sign in'}
           </Button>
+          
+          <div className="text-center mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setError(null);
+              }}
+              className="text-sm text-primary hover:underline"
+            >
+              {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+            </button>
+          </div>
         </form>
       </div>
     </div>
