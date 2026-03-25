@@ -1,52 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-@import "tailwindcss";
-
-@theme {
-  --color-primary: #1A237E;
-  --color-primary-light: #1565C0;
-  --color-primary-lighter: #1976D2;
-  --color-primary-pale: #E8EAF6;
-  --color-accent: #E53935;
-  --color-accent-light: #FFEBEE;
-  --color-success: #2E7D32;
-  --color-success-light: #E8F5E9;
-  --color-warning: #E65100;
-  --color-warning-light: #FFF3E0;
-  --color-error: #B71C1C;
-  --color-info: #0277BD;
-  --color-bg: #F5F7FA;
-  --color-surface: #FFFFFF;
-  --color-hover: #EEF2FF;
-  --color-border: #E0E7EF;
-  --color-border-focus: #1565C0;
-  --color-text: #0D1B2A;
-  --color-text-muted: #546E7A;
-  --color-text-disabled: #B0BEC5;
-  --color-text-inverse: #FFFFFF;
-  
-  --color-dark-bg: #0F172A;
-  --color-dark-surface: #1E293B;
-  --color-dark-elevated: #334155;
-  --color-dark-border: #334155;
-  --color-dark-text: #F1F5F9;
-  --color-dark-text-muted: #94A3B8;
-
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-bengali: "Hind Siliguri", "Inter", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-
-  --shadow-card: 0 2px 8px rgba(0,0,0,0.07);
-  --shadow-hover: 0 4px 16px rgba(0,0,0,0.10);
-  --shadow-modal: 0 8px 32px rgba(0,0,0,0.18);
-  --shadow-dropdown: 0 4px 20px rgba(0,0,0,0.12);
-  --shadow-topbar: 0 2px 4px rgba(0,0,0,0.15);
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 @layer base {
   body {
-    @apply bg-[var(--color-bg)] text-[var(--color-text)] font-sans antialiased;
+    @apply bg-background text-text-primary font-sans antialiased;
   }
-  .dark body {
-    @apply bg-[var(--color-dark-bg)] text-[var(--color-dark-text)];
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }

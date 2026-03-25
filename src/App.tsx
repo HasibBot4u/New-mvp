@@ -1,102 +1,72 @@
-import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Toaster } from "react-hot-toast";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "./services/firebase";
-import { useAuthStore } from "./store/authStore";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { AppLayout } from "./layout/AppLayout";
-import { AuthLayout } from "./layout/AuthLayout";
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { CatalogProvider } from './contexts/CatalogContext';
+import { Topbar } from './components/layout/Topbar';
+import { HomePage } from './pages/HomePage';
+import { CyclesPage } from './pages/CyclesPage';
+import { ChaptersPage } from './pages/ChaptersPage';
+import { VideoListPage } from './pages/VideoListPage';
+import { PlayerPage } from './pages/PlayerPage';
+import { LoginPage } from './pages/LoginPage';
+import { AdminLayout } from './pages/admin/AdminLayout';
+import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { AdminContent } from './pages/admin/AdminContent';
+import { AdminUsers } from './pages/admin/AdminUsers';
+import { AdminLogs } from './pages/admin/AdminLogs';
 
-// Pages
-import LoginPage from "./pages/Auth/LoginPage";
-import DashboardPage from "./pages/Dashboard/DashboardPage";
-import ImageGeneratorPage from "./pages/Dashboard/ImageGeneratorPage";
-import CourseCatalogPage from "./pages/Public/CourseCatalogPage";
-import MyCoursesPage from "./pages/Course/MyCoursesPage";
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, isLoading } = useAuth();
 
-export default function App() {
-  const { setAuth, clearAuth } = useAuthStore();
-  const [isAuthReady, setIsAuthReady] = useState(false);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          const userDocRef = doc(db, "users", firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          
-          let userData;
-          if (userDoc.exists()) {
-            userData = userDoc.data();
-          } else {
-            // Create user if they don't exist
-            userData = {
-              name: firebaseUser.displayName || "Student",
-              email: firebaseUser.email || "",
-              avatar: firebaseUser.photoURL || "",
-              role: "student",
-              is_active: true,
-              locale: "bn",
-              theme: "light",
-              created_at: serverTimestamp(),
-            };
-            await setDoc(userDocRef, userData);
-          }
-
-          setAuth({
-            id: firebaseUser.uid,
-            name: userData.name,
-            email: userData.email,
-            avatar: userData.avatar,
-            role: userData.role,
-            is_active: userData.is_active,
-            locale: userData.locale,
-            theme: userData.theme,
-            created_at: userData.created_at?.toString() || new Date().toISOString(),
-          });
-        } catch (error) {
-          console.error("Error fetching user data:", error);
-          clearAuth();
-        }
-      } else {
-        clearAuth();
-      }
-      setIsAuthReady(true);
-    });
-
-    return () => unsubscribe();
-  }, [setAuth, clearAuth]);
-
-  if (!isAuthReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
-        <div className="w-12 h-12 border-4 border-[var(--color-primary-pale)] border-t-[var(--color-primary)] rounded-full animate-spin"></div>
-      </div>
-    );
+  if (isLoading) {
+    return <div className="flex h-screen items-center justify-center">Loading...</div>;
   }
 
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+const AppContent: React.FC = () => {
   return (
-    <ErrorBoundary>
-      <BrowserRouter>
+    <div className="min-h-screen bg-background text-text-primary flex flex-col">
+      <Topbar />
+      <main className="flex-1">
         <Routes>
-          <Route path="/" element={<Navigate to="/courses" replace />} />
-          <Route path="/courses" element={<CourseCatalogPage />} />
+          <Route path="/login" element={<LoginPage />} />
           
-          <Route element={<AuthLayout />}>
-            <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+          <Route path="/subject/:subjectId" element={<ProtectedRoute><CyclesPage /></ProtectedRoute>} />
+          <Route path="/subject/:subjectId/cycle/:cycleId" element={<ProtectedRoute><ChaptersPage /></ProtectedRoute>} />
+          <Route path="/subject/:subjectId/cycle/:cycleId/chapter/:chapterId" element={<ProtectedRoute><VideoListPage /></ProtectedRoute>} />
+          <Route path="/video/:videoId" element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
+
+          <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="content" element={<AdminContent />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="logs" element={<AdminLogs />} />
           </Route>
 
-          <Route element={<AppLayout />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/my-courses" element={<MyCoursesPage />} />
-            <Route path="/image-generator" element={<ImageGeneratorPage />} />
-            {/* Add more protected routes here */}
-          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        <Toaster position="top-right" />
-      </BrowserRouter>
-    </ErrorBoundary>
+      </main>
+    </div>
   );
-}
+};
+
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <CatalogProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </CatalogProvider>
+    </AuthProvider>
+  );
+};
+
+export default App;
