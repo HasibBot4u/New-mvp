@@ -117,51 +117,46 @@ ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE watch_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_logs ENABLE ROW LEVEL SECURITY;
 
+-- Helper function to check if user is admin (bypasses RLS to prevent infinite recursion)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+DECLARE
+  user_role TEXT;
+BEGIN
+  SELECT role INTO user_role FROM public.profiles WHERE id = auth.uid();
+  RETURN user_role = 'admin';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Subjects policies
 CREATE POLICY "public_read_active" ON subjects FOR SELECT USING (is_active = true);
-CREATE POLICY "admin_all" ON subjects FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "admin_all" ON subjects FOR ALL USING (public.is_admin());
 
 -- Cycles policies
 CREATE POLICY "public_read_active" ON cycles FOR SELECT USING (is_active = true);
-CREATE POLICY "admin_all" ON cycles FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "admin_all" ON cycles FOR ALL USING (public.is_admin());
 
 -- Chapters policies
 CREATE POLICY "public_read_active" ON chapters FOR SELECT USING (is_active = true);
-CREATE POLICY "admin_all" ON chapters FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "admin_all" ON chapters FOR ALL USING (public.is_admin());
 
 -- Videos policies
 CREATE POLICY "public_read_active" ON videos FOR SELECT USING (is_active = true);
-CREATE POLICY "admin_all" ON videos FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "admin_all" ON videos FOR ALL USING (public.is_admin());
 
 -- Profiles policies
 CREATE POLICY "users_read_own" ON profiles FOR SELECT USING (id = auth.uid());
 CREATE POLICY "users_update_own" ON profiles FOR UPDATE USING (id = auth.uid());
-CREATE POLICY "admin_read_all" ON profiles FOR SELECT USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
-CREATE POLICY "admin_update_all" ON profiles FOR UPDATE USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "admin_read_all" ON profiles FOR SELECT USING (public.is_admin());
+CREATE POLICY "admin_update_all" ON profiles FOR UPDATE USING (public.is_admin());
 
 -- Watch history policies
 CREATE POLICY "users_manage_own" ON watch_history FOR ALL USING (user_id = auth.uid());
-CREATE POLICY "admin_read_all" ON watch_history FOR SELECT USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "admin_read_all" ON watch_history FOR SELECT USING (public.is_admin());
 
 -- Activity logs policies
 CREATE POLICY "anyone_insert" ON activity_logs FOR INSERT WITH CHECK (true);
-CREATE POLICY "admin_read_all" ON activity_logs FOR SELECT USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+CREATE POLICY "admin_read_all" ON activity_logs FOR SELECT USING (public.is_admin());
 
 -- TRIGGERS
 CREATE OR REPLACE FUNCTION public.handle_new_user()

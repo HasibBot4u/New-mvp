@@ -1,6 +1,6 @@
 import { Catalog } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = 'https://edbe7e18-233b-4ff5-bed9-83c4e0edd51e-00-25a1ryv2rxe0o.sisko.replit.dev';
 
 export const api = {
   async getCatalog(): Promise<Catalog> {

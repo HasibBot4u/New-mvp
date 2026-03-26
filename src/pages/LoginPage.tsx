@@ -10,6 +10,7 @@ export const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -17,40 +18,82 @@ export const LoginPage: React.FC = () => {
     return <Navigate to="/" replace />;
   }
 
-  const isConfigured = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_URL !== 'your_supabase_project_url';
+  const handleSignUp = async (email: string, password: string) => {
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+      });
+      
+      if (error) {
+        // Show the error message to the user
+        setError(error.message);
+        return;
+      }
+      
+      if (data.user) {
+        setSuccess('Account created! You can now log in.');
+      }
+    } catch (err: any) {
+      setError('Connection failed. Please try again.');
+      console.error('SignUp error:', err);
+    }
+  };
+
+  const handleLogin = async (email: string, password: string) => {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
+      
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      
+      if (data.session) {
+        // Check if user is admin
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', data.user.id)
+          .single();
+        
+        if (!profile) {
+          // Profile doesn't exist yet, create it
+          await supabase.from('profiles').insert({
+            id: data.user.id,
+            email: data.user.email,
+            display_name: data.user.email?.split('@')[0] || 'User',
+            role: 'user',
+          });
+        }
+        
+        if (profile?.role === 'admin') {
+          navigate('/admin/dashboard');
+        } else {
+          navigate('/');
+        }
+      }
+    } catch (err: any) {
+      setError('Connection failed. Please try again.');
+      console.error('Login error:', err);
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!isConfigured) {
-      setError('Supabase is not configured. Please set the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.');
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (error) throw error;
-        setError('Check your email for the confirmation link.');
+        await handleSignUp(email, password);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
-        navigate('/');
-      }
-    } catch (err: any) {
-      if (err.message === 'Failed to fetch') {
-        setError('Network error: Failed to connect to Supabase. Please check your internet connection or verify that your Supabase project is active and the URL is correct.');
-      } else {
-        setError(err.message || `Failed to ${isSignUp ? 'sign up' : 'log in'}`);
+        await handleLogin(email, password);
       }
     } finally {
       setIsLoading(false);
@@ -72,16 +115,16 @@ export const LoginPage: React.FC = () => {
           </p>
         </div>
 
-        {!isConfigured && (
-          <div className="rounded-md bg-yellow-50 p-4 text-sm text-yellow-800 border border-yellow-200">
-            <strong>Configuration Missing:</strong> You need to set your Supabase environment variables in the settings menu before you can sign in.
-          </div>
-        )}
-
         <form className="mt-8 space-y-6" onSubmit={handleAuth}>
           {error && (
-            <div className={`rounded-md p-4 text-sm border ${error.includes('Check your email') ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+            <div className="rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200">
               {error}
+            </div>
+          )}
+          
+          {success && (
+            <div className="rounded-md bg-green-50 p-4 text-sm text-green-700 border border-green-200">
+              {success}
             </div>
           )}
 
@@ -114,7 +157,7 @@ export const LoginPage: React.FC = () => {
             </div>
           </div>
 
-          <Button type="submit" className="w-full" isLoading={isLoading} disabled={!isConfigured}>
+          <Button type="submit" className="w-full" isLoading={isLoading}>
             {isSignUp ? 'Sign up' : 'Sign in'}
           </Button>
           
@@ -124,6 +167,7 @@ export const LoginPage: React.FC = () => {
               onClick={() => {
                 setIsSignUp(!isSignUp);
                 setError(null);
+                setSuccess(null);
               }}
               className="text-sm text-primary hover:underline"
             >
