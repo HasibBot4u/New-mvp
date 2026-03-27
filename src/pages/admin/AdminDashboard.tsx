@@ -13,6 +13,8 @@ export const AdminDashboard: React.FC = () => {
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
+
   useEffect(() => {
     const fetchStats = async () => {
       try {
@@ -30,6 +32,19 @@ export const AdminDashboard: React.FC = () => {
           activeUsers: usersCount || 0, // Simplified for now
           totalViews: viewsCount || 0,
         });
+
+        const { data: logsData } = await supabase
+          .from('activity_logs')
+          .select(`
+            *,
+            profiles:user_id (display_name, email)
+          `)
+          .order('created_at', { ascending: false })
+          .limit(5);
+          
+        if (logsData) {
+          setRecentLogs(logsData);
+        }
       } catch (error) {
         console.error('Error fetching stats:', error);
       }
@@ -95,7 +110,25 @@ export const AdminDashboard: React.FC = () => {
         <div className="rounded-xl border border-border bg-surface p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-text-primary mb-4">Recent Activity</h3>
           <div className="space-y-4">
-            <p className="text-sm text-text-secondary">Activity feed will appear here.</p>
+            {recentLogs.length > 0 ? (
+              recentLogs.map((log) => (
+                <div key={log.id} className="flex flex-col border-b border-border pb-3 last:border-0 last:pb-0">
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-medium text-text-primary">
+                      {log.profiles?.display_name || log.profiles?.email || 'Unknown User'}
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      {new Date(log.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <span className="text-sm text-text-secondary mt-1">
+                    {log.action.replace('_', ' ')}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-text-secondary">No recent activity.</p>
+            )}
           </div>
         </div>
         <div className="rounded-xl border border-border bg-surface p-6 shadow-sm">

@@ -20,7 +20,7 @@ export const CatalogProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setIsLoading(true);
     setError(null);
     try {
-      const data = await api.getCatalog();
+      const data = await api.getCatalogWithCache();
       setCatalog(data);
     } catch (err: any) {
       setError(err.message || 'Failed to load catalog');

@@ -147,7 +147,7 @@ CREATE POLICY "admin_all" ON videos FOR ALL USING (public.is_admin());
 -- Profiles policies
 CREATE POLICY "users_read_own" ON profiles FOR SELECT USING (id = auth.uid());
 CREATE POLICY "users_update_own" ON profiles FOR UPDATE USING (id = auth.uid());
-CREATE POLICY "admin_read_all" ON profiles FOR SELECT USING (public.is_admin());
+CREATE POLICY "auth_read_all" ON profiles FOR SELECT USING (auth.role() = 'authenticated');
 CREATE POLICY "admin_update_all" ON profiles FOR UPDATE USING (public.is_admin());
 
 -- Watch history policies

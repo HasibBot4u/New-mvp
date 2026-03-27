@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, logActivity } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 
@@ -32,6 +32,7 @@ export const LoginPage: React.FC = () => {
       }
       
       if (data.user) {
+        await logActivity(data.user.id, 'signup', { email });
         setSuccess('Account created! You can now log in.');
       }
     } catch (err: any) {
@@ -53,21 +54,32 @@ export const LoginPage: React.FC = () => {
       }
       
       if (data.session) {
+        await logActivity(data.user.id, 'login', { email });
         // Check if user is admin
-        const { data: profile } = await supabase
+        const { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', data.user.id)
           .single();
         
-        if (!profile) {
+        if (profileError && profileError.code !== 'PGRST116') {
+          // PGRST116 is "No rows found". Any other error is a real error.
+          console.error('Error fetching profile:', profileError);
+          // If it's a recursion error or something else, we still log them in as a regular user
+          // to prevent them from being completely stuck, but we log the error.
+        }
+        
+        if (!profile && (!profileError || profileError.code === 'PGRST116')) {
           // Profile doesn't exist yet, create it
-          await supabase.from('profiles').insert({
+          const { error: insertError } = await supabase.from('profiles').insert({
             id: data.user.id,
             email: data.user.email,
             display_name: data.user.email?.split('@')[0] || 'User',
             role: 'user',
           });
+          if (insertError) {
+             console.error('Error creating profile:', insertError);
+          }
         }
         
         if (profile?.role === 'admin') {

@@ -32,6 +32,7 @@ export const AdminUsers: React.FC = () => {
 
   const filteredUsers = users.filter(user => 
     user.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     user.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -98,8 +99,8 @@ export const AdminUsers: React.FC = () => {
                 filteredUsers.map((user) => (
                   <tr key={user.id} className="border-b border-border hover:bg-surface/50">
                     <td className="px-6 py-4">
-                      <div className="font-medium text-text-primary">{user.display_name || 'Unknown User'}</div>
-                      <div className="text-xs text-text-muted font-mono mt-0.5">{user.id}</div>
+                      <div className="font-medium text-text-primary">{user.display_name || user.email || 'Unknown User'}</div>
+                      <div className="text-xs text-text-muted font-mono mt-0.5">{user.email || user.id}</div>
                     </td>
                     <td className="px-6 py-4">
                       <Badge variant={user.role === 'admin' ? 'primary' : 'default'} className="capitalize">

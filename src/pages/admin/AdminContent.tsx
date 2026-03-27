@@ -25,11 +25,29 @@ export const AdminContent: React.FC = () => {
   const allChapters = allCycles.flatMap(c => c.chapters) || [];
   const allVideos = allChapters.flatMap(c => c.videos) || [];
 
+  const filteredSubjects = catalog?.subjects.filter(s => 
+    s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    s.description?.toLowerCase().includes(searchQuery.toLowerCase())
+  ) || [];
+
+  const filteredCycles = allCycles.filter(c => 
+    c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.telegram_channel_id.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredChapters = allChapters.filter(c => 
+    c.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredVideos = allVideos.filter(v => 
+    v.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   const tabs = [
-    { id: 'subjects', label: 'Subjects', count: catalog?.subjects.length || 0 },
-    { id: 'cycles', label: 'Cycles', count: allCycles.length },
-    { id: 'chapters', label: 'Chapters', count: allChapters.length },
-    { id: 'videos', label: 'Videos', count: allVideos.length },
+    { id: 'subjects', label: 'Subjects', count: filteredSubjects.length },
+    { id: 'cycles', label: 'Cycles', count: filteredCycles.length },
+    { id: 'chapters', label: 'Chapters', count: filteredChapters.length },
+    { id: 'videos', label: 'Videos', count: filteredVideos.length },
   ];
 
   const handleEdit = (item: any) => {
@@ -56,6 +74,14 @@ export const AdminContent: React.FC = () => {
       delete dataToSave.cycles;
       delete dataToSave.chapters;
       delete dataToSave.videos;
+
+      if (activeTab === 'videos') {
+        const chapter = allChapters.find(c => c.id === dataToSave.chapter_id);
+        const cycle = allCycles.find(c => c.id === chapter?.cycle_id);
+        if (cycle) {
+          dataToSave.telegram_channel_id = cycle.telegram_channel_id;
+        }
+      }
 
       if (editingItem) {
         const { error } = await supabase.from(table).update(dataToSave).eq('id', editingItem.id);
@@ -106,7 +132,7 @@ export const AdminContent: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {catalog?.subjects.map((subject) => (
+                {filteredSubjects.map((subject) => (
                   <tr key={subject.id} className="border-b border-border hover:bg-surface/50">
                     <td className="px-6 py-4 font-medium text-text-primary">{subject.name}</td>
                     <td className="px-6 py-4 truncate max-w-xs">{subject.description}</td>
@@ -136,7 +162,7 @@ export const AdminContent: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {allCycles.map((cycle) => {
+                {filteredCycles.map((cycle) => {
                   const subject = catalog?.subjects.find(s => s.cycles.some(c => c.id === cycle.id));
                   return (
                     <tr key={cycle.id} className="border-b border-border hover:bg-surface/50">
@@ -172,7 +198,7 @@ export const AdminContent: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {allChapters.map((chapter) => {
+                {filteredChapters.map((chapter) => {
                   const cycle = allCycles.find(c => c.id === chapter.cycle_id);
                   const subject = catalog?.subjects.find(s => s.cycles.some(c => c.id === cycle?.id));
                   return (
@@ -211,7 +237,7 @@ export const AdminContent: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {allVideos.map((video) => {
+                {filteredVideos.map((video) => {
                   const chapter = allChapters.find(c => c.id === video.chapter_id);
                   const cycle = allCycles.find(c => c.id === chapter?.cycle_id);
                   return (
@@ -447,10 +473,10 @@ export const AdminContent: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-text-primary mb-1">Telegram Message ID</label>
                 <input
-                  type="text"
+                  type="number"
                   required
                   value={formData.telegram_message_id || ''}
-                  onChange={(e) => setFormData({ ...formData, telegram_message_id: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, telegram_message_id: parseInt(e.target.value) || 0 })}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>

@@ -36,7 +36,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleError = (e: Event) => {
       console.error('Video error:', e);
-      setError('Failed to load video stream. Please try again later.');
+      // The backend might be asleep (Render free tier) or unreachable
+      setError('Failed to load video stream. The backend server might be sleeping or unreachable.');
       setIsLoading(false);
     };
 
@@ -70,6 +71,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [onProgress, onEnded]);
 
+  const handleRetry = () => {
+    setError(null);
+    setIsLoading(true);
+    if (videoRef.current) {
+      videoRef.current.load();
+    }
+  };
+
   return (
     <div className="relative w-full overflow-hidden rounded-xl bg-black aspect-video shadow-lg">
       {error ? (
@@ -77,7 +86,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <svg className="w-12 h-12 text-red-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          <p className="font-medium">{error}</p>
+          <p className="font-medium mb-2">{error}</p>
+          <p className="text-sm text-text-secondary mb-4">If this is the first request in a while, it may take up to 50 seconds to wake up.</p>
+          <button 
+            onClick={handleRetry}
+            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
+          >
+            Retry Video
+          </button>
         </div>
       ) : (
         <>

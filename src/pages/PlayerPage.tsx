@@ -2,7 +2,7 @@ import React, { useMemo, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useCatalog } from '../contexts/CatalogContext';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { logActivity, saveProgress } from '../lib/supabase';
 import { Breadcrumb } from '../components/layout/Breadcrumb';
 import { VideoPlayer } from '../components/video/VideoPlayer';
 import { Skeleton } from '../components/ui/Skeleton';
@@ -28,27 +28,14 @@ export const PlayerPage: React.FC = () => {
     return { subject: null, cycle: null, chapter: null, video: null };
   }, [catalog, videoId]);
 
-  // Log activity and update watch history
+  // Log activity
   useEffect(() => {
     if (!user || !video) return;
-
-    const logActivity = async () => {
-      try {
-        await supabase.from('activity_logs').insert({
-          user_id: user.id,
-          action: 'watch_video',
-          details: { 
-            entity_type: 'video',
-            entity_id: video.id,
-            title: video.title 
-          }
-        });
-      } catch (err) {
-        console.error('Failed to log activity:', err);
-      }
-    };
-
-    logActivity();
+    logActivity(user.id, 'watch_video', { 
+      entity_type: 'video',
+      entity_id: video.id,
+      title: video.title 
+    });
   }, [user, video]);
 
   const handleProgress = async (currentTime: number, duration: number) => {
@@ -57,36 +44,8 @@ export const PlayerPage: React.FC = () => {
     // Only update history every 10 seconds to avoid spamming the DB
     if (Math.floor(currentTime) % 10 !== 0) return;
 
-    try {
-      const progressPercent = Math.min(100, Math.max(0, Math.floor((currentTime / duration) * 100)));
-      
-      const { data: existing } = await supabase
-        .from('watch_history')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('video_id', video.id)
-        .maybeSingle();
-
-      if (existing) {
-        await supabase
-          .from('watch_history')
-          .update({
-            progress_percent: progressPercent,
-            last_watched_at: new Date().toISOString()
-          })
-          .eq('id', existing.id);
-      } else {
-        await supabase
-          .from('watch_history')
-          .insert({
-            user_id: user.id,
-            video_id: video.id,
-            progress_percent: progressPercent
-          });
-      }
-    } catch (err) {
-      console.error('Failed to update watch history:', err);
-    }
+    const progressPercent = Math.min(100, Math.max(0, Math.floor((currentTime / duration) * 100)));
+    await saveProgress(user.id, video.id, progressPercent);
   };
 
   if (isLoading) {
