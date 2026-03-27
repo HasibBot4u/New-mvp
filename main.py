@@ -224,12 +224,12 @@ app.add_middleware(
 
 # ─── ENDPOINTS ────────────────────────────────────────────────
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"service": "NexusEdu Backend", "status": "running"}
 
 
-@app.get("/api/health")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def health():
     connected = tg is not None and tg.is_connected
     return {
