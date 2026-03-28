@@ -9,7 +9,7 @@ async function getWorkingBackend(): Promise<string> {
   const cachedBackend = localStorage.getItem('working_backend');
   if (cachedBackend) {
     try {
-      const response = await fetch(`${cachedBackend}/api/catalog`, { method: 'HEAD' });
+      const response = await fetch(`${cachedBackend}/`, { method: 'GET' });
       if (response.ok) return cachedBackend;
     } catch (e) {
       // Cached backend failed, fall through to check both
@@ -18,7 +18,7 @@ async function getWorkingBackend(): Promise<string> {
 
   // Try primary
   try {
-    const response = await fetch(`${PRIMARY_BACKEND}/api/catalog`, { method: 'HEAD' });
+    const response = await fetch(`${PRIMARY_BACKEND}/`, { method: 'GET' });
     if (response.ok) {
       localStorage.setItem('working_backend', PRIMARY_BACKEND);
       return PRIMARY_BACKEND;
@@ -29,7 +29,7 @@ async function getWorkingBackend(): Promise<string> {
 
   // Try secondary
   try {
-    const response = await fetch(`${SECONDARY_BACKEND}/api/catalog`, { method: 'HEAD' });
+    const response = await fetch(`${SECONDARY_BACKEND}/`, { method: 'GET' });
     if (response.ok) {
       localStorage.setItem('working_backend', SECONDARY_BACKEND);
       return SECONDARY_BACKEND;

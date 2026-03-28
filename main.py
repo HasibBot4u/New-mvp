@@ -229,7 +229,7 @@ async def root():
     return {"service": "NexusEdu Backend", "status": "running"}
 
 
-@app.api_route("/", methods=["GET", "HEAD"])
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
     connected = tg is not None and tg.is_connected
     return {
