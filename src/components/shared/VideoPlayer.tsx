@@ -27,8 +27,28 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [buffered, setBuffered] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [hasStarted, setHasStarted] = useState(false);
 
   const streamUrl = `https://nexusedu-backend-0bjq.onrender.com/api/stream/${videoId}`;
+
+  const startVideo = async () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    
+    setHasStarted(true);
+    setIsBuffering(true);
+    
+    // Step 1: Set src with cache-busting to force fresh request
+    video.src = streamUrl;
+    
+    // Step 2: Load metadata first (fast — just gets file size/duration)
+    video.load();
+    
+    // Step 3: Attempt to play as soon as any data arrives
+    video.addEventListener('loadedmetadata', () => {
+      video.play().catch(() => {});
+    }, { once: true });
+  };
 
   // Load saved settings
   useEffect(() => {
@@ -281,9 +301,8 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
     >
       <video
         ref={videoRef}
-        src={streamUrl}
         playsInline
-        preload="auto"
+        preload="metadata"
         className="w-full h-full object-contain"
         onTimeUpdate={handleTimeUpdate}
         onDurationChange={handleDurationChange}
@@ -296,6 +315,19 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
         onContextMenu={(e) => e.preventDefault()}
         onClick={togglePlay}
       />
+
+      {/* Initial Play Overlay */}
+      {!hasStarted && (
+        <div 
+          className="absolute inset-0 bg-black flex flex-col items-center justify-center cursor-pointer z-20"
+          onClick={startVideo}
+        >
+          <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4 hover:bg-white/20 hover:scale-110 transition-all duration-200">
+            <Play className="w-8 h-8 text-white ml-1" fill="currentColor" />
+          </div>
+          <p className="text-white/60 text-sm font-medium">Tap to play</p>
+        </div>
+      )}
 
       {/* Loading Spinner */}
       {isBuffering && (

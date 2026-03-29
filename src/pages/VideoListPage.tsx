@@ -66,6 +66,21 @@ export function VideoListPage() {
   const { subject, cycle, chapter } = data;
   const videos = chapter.videos || [];
   
+  useEffect(() => {
+    if (!videos || videos.length === 0) return;
+    
+    // Fire prefetch for all videos in this chapter
+    // Stagger by 200ms each to avoid hammering the backend
+    videos.forEach((video: any, index: number) => {
+      setTimeout(() => {
+        fetch(
+          `https://nexusedu-backend-0bjq.onrender.com/api/prefetch/${video.id}`,
+          { method: 'GET' }
+        ).catch(() => {}); // silently ignore errors
+      }, index * 200);
+    });
+  }, [videos]);
+
   const completedCount = videos.filter((v: any) => isCompleted(v.id)).length;
   const progressPercent = videos.length > 0 ? Math.round((completedCount / videos.length) * 100) : 0;
 

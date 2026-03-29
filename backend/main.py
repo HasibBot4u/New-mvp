@@ -23,7 +23,7 @@ TEST_CHANNEL_ID = -1003569793885
 TEST_MESSAGE_ID = 3
 CHUNK_SIZE      = 1024 * 1024   # 1 MB per chunk
 CATALOG_TTL     = 300           # 5 minutes cache TTL
-INITIAL_BUFFER  = 2 * 1024 * 1024  # 2MB — enough to start playing instantly
+INITIAL_BUFFER  = 512 * 1024  # 512KB — enough to start playing instantly
 
 # ─── STATE ────────────────────────────────────────────────────
 tg: Optional[Client] = None
@@ -140,7 +140,7 @@ async def fetch_all_videos(client: httpx.AsyncClient) -> list:
         offset += 1000
     return all_videos
 
-async def _prewarm_messages(video_items: list):
+async def _prewarm_all(video_items: list):
     """
     Background task: pre-fetches Telegram messages for all videos
     so they are in message_cache before any user clicks play.
@@ -261,7 +261,7 @@ async def refresh_catalog():
 
         # Pre-warm message cache for all videos so first play is instant.
         # Run as background task — does not block catalog from serving.
-        asyncio.create_task(_prewarm_messages(list(video_map.items())))
+        asyncio.create_task(_prewarm_all(list(video_map.items())))
 
     except Exception as e:
         print(f"[NexusEdu] Catalog load error: {e}")
@@ -450,6 +450,43 @@ async def catalog():
 async def force_refresh():
     await refresh_catalog()
     return {"status": "refreshed", "videos": len(video_map)}
+
+
+@app.get("/api/warmup")
+async def warmup():
+    if not video_map:
+        return JSONResponse({"status": "ignored", "reason": "no videos mapped"})
+    asyncio.create_task(_prewarm_all(list(video_map.items())))
+    return JSONResponse({"status": "started", "videos": len(video_map)})
+
+
+@app.get("/api/prefetch/{video_id}")
+async def prefetch_video(video_id: str):
+    if video_id not in video_map:
+        return JSONResponse({"status": "ignored", "reason": "not found"})
+    
+    info = video_map[video_id]
+    channel_id_str = info.get("channel_id", "")
+    message_id = info.get("message_id", 0)
+    
+    if not channel_id_str or not message_id:
+        return JSONResponse({"status": "ignored", "reason": "no telegram link"})
+        
+    key = f"{channel_id_str}_{message_id}"
+    if key in message_cache:
+        return JSONResponse({"status": "cached", "reason": "already cached"})
+        
+    try:
+        channel_id = int(channel_id_str)
+        await resolve_channel(channel_id)
+        msg = await tg.get_messages(channel_id, message_id)
+        if msg and not msg.empty:
+            message_cache[key] = msg
+            return JSONResponse({"status": "success", "reason": "fetched"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "reason": str(e)})
+        
+    return JSONResponse({"status": "error", "reason": "unknown"})
 
 
 @app.get("/api/stream/{video_id}")
