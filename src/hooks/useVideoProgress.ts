@@ -12,6 +12,7 @@ export function useVideoProgress() {
 
   const setProgress = (videoId: string, time: number) => {
     localStorage.setItem(`nexusedu_progress_${videoId}`, String(time));
+    localStorage.setItem(`nexusedu_last_watched_${videoId}`, String(Date.now()));
     triggerUpdate();
   };
 
@@ -40,7 +41,7 @@ export function useVideoProgress() {
   const getStats = () => {
     let completedCount = 0;
     let totalSecondsWatched = 0;
-    const inProgressVideos: { videoId: string; progress: number }[] = [];
+    const inProgressVideos: { videoId: string; progress: number; lastWatched: number }[] = [];
 
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
@@ -53,7 +54,10 @@ export function useVideoProgress() {
         const progress = parseFloat(localStorage.getItem(key) || '0');
         if (progress > 0) {
           totalSecondsWatched += progress;
-          inProgressVideos.push({ videoId, progress });
+          if (localStorage.getItem(`nexusedu_complete_${videoId}`) !== 'true') {
+            const lastWatched = parseInt(localStorage.getItem(`nexusedu_last_watched_${videoId}`) || '0', 10);
+            inProgressVideos.push({ videoId, progress, lastWatched });
+          }
           // For streak, we just use a simple mock based on progress existence for now, 
           // or we could track actual dates in a separate key. Let's track dates in a separate key if needed, 
           // but for now we'll just return a placeholder or calculate from a 'nexusedu_watch_dates' key.

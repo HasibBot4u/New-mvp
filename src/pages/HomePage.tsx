@@ -23,7 +23,7 @@ export function HomePage() {
 
   const continueWatching = useMemo(() => {
     if (!catalog) return [];
-    const inProgress = stats.inProgressVideos.sort((a, b) => b.progress - a.progress).slice(0, 5);
+    const inProgress = stats.inProgressVideos.sort((a, b) => b.lastWatched - a.lastWatched).slice(0, 5);
     
     return inProgress.map(p => {
       for (const subject of catalog.subjects) {

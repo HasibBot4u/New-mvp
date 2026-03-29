@@ -145,7 +145,7 @@ CREATE POLICY "admin_all" ON videos FOR ALL USING (public.is_admin());
 
 -- Profiles policies
 CREATE POLICY "auth_read_all" ON profiles FOR SELECT USING (
-  auth.role() = 'authenticated' OR public.is_admin()
+  auth.role() = 'authenticated'
 );
 CREATE POLICY "users_update_own" ON profiles FOR UPDATE USING (id = auth.uid());
 -- We can use is_admin() for UPDATE/DELETE because those don't trigger the SELECT policy loop
