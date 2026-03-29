@@ -1,237 +1,281 @@
-import React, { useMemo, useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useState, useEffect, useMemo } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { ArrowLeft, CheckCircle, PlayCircle, FileText, ListVideo, Info } from 'lucide-react';
 import { useCatalog } from '../contexts/CatalogContext';
-import { useAuth } from '../contexts/AuthContext';
-import { logActivity, saveProgress } from '../lib/supabase';
-import { Breadcrumb } from '../components/layout/Breadcrumb';
+import { VideoPlayer } from '../components/shared/VideoPlayer';
+import { useVideoProgress } from '../hooks/useVideoProgress';
+import { Breadcrumb } from '../components/ui/Breadcrumb';
 import { Skeleton } from '../components/ui/Skeleton';
-import { FileText, Clock, AlertCircle, PlayCircle } from 'lucide-react';
 
-export const PlayerPage: React.FC = () => {
+export function PlayerPage() {
   const { videoId } = useParams<{ videoId: string }>();
-  const { catalog, isLoading: isCatalogLoading } = useCatalog();
-  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { catalog, isLoading } = useCatalog();
+  const { isCompleted, setCompleted, getNotes, setNotes } = useVideoProgress();
+  
+  const [activeTab, setActiveTab] = useState<'about' | 'notes' | 'list'>('about');
+  const [notesText, setNotesText] = useState('');
+  const [visible, setVisible] = useState(false);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  useEffect(() => {
+    setVisible(true);
+    if (videoId) {
+      setNotesText(getNotes(videoId));
+    }
+  }, [videoId]);
 
-  const { subject, cycle, chapter, video } = useMemo(() => {
-    if (!catalog) return { subject: null, cycle: null, chapter: null, video: null };
-    for (const s of catalog.subjects) {
-      for (const c of s.cycles) {
-        for (const ch of c.chapters) {
-          const v = ch.videos.find(v => v.id === videoId);
-          if (v) {
-            return { subject: s, cycle: c, chapter: ch, video: v };
+  const handleNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setNotesText(e.target.value);
+    if (videoId) setNotes(videoId, e.target.value);
+  };
+
+  const clearNotes = () => {
+    setNotesText('');
+    if (videoId) setNotes(videoId, '');
+  };
+
+  const videoContext = useMemo(() => {
+    if (!catalog || !videoId) return null;
+
+    for (const subject of catalog.subjects) {
+      for (const cycle of subject.cycles) {
+        for (const chapter of cycle.chapters) {
+          const index = chapter.videos.findIndex((v: any) => v.id === videoId);
+          if (index !== -1) {
+            return {
+              subject,
+              cycle,
+              chapter,
+              video: chapter.videos[index],
+              allVideos: chapter.videos,
+              prevVideo: index > 0 ? chapter.videos[index - 1] : null,
+              nextVideo: index < chapter.videos.length - 1 ? chapter.videos[index + 1] : null,
+            };
           }
         }
       }
     }
-    return { subject: null, cycle: null, chapter: null, video: null };
+    return null;
   }, [catalog, videoId]);
 
-  // Log activity
-  useEffect(() => {
-    if (!user || !video) return;
-    logActivity(user.id, 'watch_video', { 
-      entity_type: 'video',
-      entity_id: video.id,
-      title: video.title 
-    });
-  }, [user, video]);
-
-  // Reset state when video changes
-  useEffect(() => {
-    setIsLoading(true);
-    setError(null);
-  }, [videoId]);
-
-  // 30-second timeout for video loading
-  useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-    
-    if (isLoading && !error) {
-      timeoutId = setTimeout(() => {
-        setError("Video is taking too long. Tap Retry.");
-        setIsLoading(false);
-      }, 30000);
-    }
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [isLoading, error]);
-
-  const handleTimeUpdate = async () => {
-    if (!user || !video || !videoRef.current) return;
-    const currentTime = videoRef.current.currentTime;
-    const duration = videoRef.current.duration;
-    
-    if (duration <= 0) return;
-    
-    // Only update history every 10 seconds to avoid spamming the DB
-    if (Math.floor(currentTime) % 10 !== 0) return;
-
-    const progressPercent = Math.min(100, Math.max(0, Math.floor((currentTime / duration) * 100)));
-    await saveProgress(user.id, video.id, progressPercent);
-  };
-
-  const handleVideoEnd = async () => {
-    if (!user || !video) return;
-    await saveProgress(user.id, video.id, 100);
-  };
-
-  const handleVideoError = () => {
-    setError("Failed to load video stream. The backend server might be sleeping or unreachable.");
-    setIsLoading(false);
-  };
-
-  const handleRetry = () => {
-    setError(null);
-    setIsLoading(true);
-    if (videoRef.current && videoId) {
-      videoRef.current.src = `https://nexusedu-backend-0bjq.onrender.com/api/stream/${videoId}`;
-      videoRef.current.load();
-    }
-  };
-
-  if (isCatalogLoading) {
+  if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 max-w-5xl">
-        <Skeleton className="h-6 w-96 mb-6" />
-        <Skeleton className="w-full aspect-video rounded-xl mb-6" />
-        <Skeleton className="h-8 w-64 mb-4" />
-        <Skeleton className="h-24 w-full rounded-lg" />
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <div className="h-16 bg-primary" />
+        <div className="w-full aspect-video bg-black" />
+        <div className="max-w-4xl mx-auto p-4 space-y-4">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
       </div>
     );
   }
 
-  if (!video || !chapter || !cycle || !subject) {
+  if (!videoContext) {
     return (
-      <div className="container mx-auto px-4 py-16 text-center">
-        <AlertCircle className="mx-auto h-12 w-12 text-red-500 mb-4" />
-        <h2 className="text-2xl font-bold text-text-primary mb-2">Video Not Found</h2>
-        <p className="text-text-secondary mb-6">The video you are looking for does not exist or has been removed.</p>
-        <Link to="/" className="text-primary hover:underline font-medium">
-          Return to Home
-        </Link>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Video Not Found</h2>
+        <p className="text-gray-600 mb-6">The video you are looking for does not exist or has been removed.</p>
+        <button 
+          onClick={() => navigate('/')}
+          className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+        >
+          Return Home
+        </button>
       </div>
     );
   }
 
-  const streamUrl = `https://nexusedu-backend-0bjq.onrender.com/api/stream/${videoId}`;
+  const { subject, cycle, chapter, video, allVideos, prevVideo, nextVideo } = videoContext;
+  const completed = isCompleted(video.id);
 
   return (
-    <div className="container mx-auto px-4 py-6 sm:px-6 lg:px-8 max-w-6xl">
-      <div className="mb-6">
-        <Breadcrumb
-          items={[
-            { label: subject.name, href: `/subject/${subject.id}` },
-            { label: cycle.name, href: `/subject/${subject.id}/cycle/${cycle.id}` },
-            { label: chapter.name, href: `/subject/${subject.id}/cycle/${cycle.id}/chapter/${chapter.id}` },
-            { label: video.title }
-          ]}
-        />
+    <div className={`min-h-screen bg-gray-50 pb-20 transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+      {/* Topbar */}
+      <header className="bg-primary text-white h-16 flex items-center px-4 sticky top-0 z-30 shadow-md">
+        <button 
+          onClick={() => navigate(-1)}
+          className="p-2 -ml-2 hover:bg-white/10 rounded-full transition-colors mr-3"
+        >
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <h1 className="text-lg font-medium truncate">{video.title}</h1>
+      </header>
+
+      {/* Video Player Area */}
+      <div className="w-full bg-black">
+        <div className="max-w-6xl mx-auto">
+          <VideoPlayer videoId={video.id} onComplete={() => setCompleted(video.id, true)} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
-          <div className="mb-6">
-            <div className="relative w-full overflow-hidden rounded-xl bg-black aspect-video shadow-lg">
-              {error ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface text-text-primary p-6 text-center z-10">
-                  <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-                  <p className="font-medium mb-4">{error}</p>
-                  <button 
-                    onClick={handleRetry}
-                    className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : null}
+      <main className="max-w-4xl mx-auto px-4 py-6">
+        <Breadcrumb items={[
+          { label: 'Home', href: '/' },
+          { label: subject.name, href: `/subject/${subject.id}` },
+          { label: cycle.name, href: `/cycle/${cycle.id}` },
+          { label: chapter.name, href: `/chapter/${chapter.id}` },
+          { label: video.title }
+        ]} />
 
-              <video
-                ref={videoRef}
-                controls
-                playsInline
-                preload="auto"
-                src={streamUrl}
-                style={{ width: '100%', aspectRatio: '16/9', backgroundColor: '#000' }}
-                onError={handleVideoError}
-                onCanPlay={() => { setIsLoading(false); setError(null); }}
-                onWaiting={() => setIsLoading(true)}
-                onPlaying={() => { setIsLoading(false); setError(null); }}
-                onTimeUpdate={handleTimeUpdate}
-                onEnded={handleVideoEnd}
-                onContextMenu={(e) => e.preventDefault()}
-              />
-              
-              {isLoading && !error && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 pointer-events-none z-10">
-                  <svg className="w-12 h-12 text-white animate-spin mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <p className="text-white font-medium">Loading from Telegram... 10-15 seconds</p>
-                </div>
-              )}
-            </div>
-          </div>
-
+        <div className="flex items-start justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-text-primary mb-2">{video.title}</h1>
-            
-            <div className="flex items-center gap-4 text-sm text-text-secondary mb-6 pb-6 border-b border-border">
-              <div className="flex items-center">
-                <Clock size={16} className="mr-1" />
-                {video.duration || 'Unknown duration'}
-              </div>
-              <div className="flex items-center">
-                <FileText size={16} className="mr-1" />
-                {video.size_mb ? `${video.size_mb} MB` : 'Unknown size'}
-              </div>
-            </div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">{video.title}</h1>
+            <p className="text-sm text-gray-500">{chapter.name} • {video.duration}</p>
           </div>
+          <label className="flex items-center space-x-2 cursor-pointer bg-white px-4 py-2 rounded-lg border border-gray-200 shadow-sm hover:bg-gray-50 transition-colors">
+            <input 
+              type="checkbox" 
+              checked={completed}
+              onChange={(e) => setCompleted(video.id, e.target.checked)}
+              className="w-5 h-5 rounded text-primary focus:ring-primary border-gray-300"
+            />
+            <span className={`font-medium ${completed ? 'text-success' : 'text-gray-700'}`}>
+              Mark as complete
+            </span>
+          </label>
         </div>
 
-        <div className="lg:col-span-1">
-          <div className="rounded-xl border border-border bg-surface p-5 sticky top-24">
-            <h3 className="text-lg font-semibold text-text-primary mb-4">Up Next in {chapter.name}</h3>
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 scrollbar-hide">
-              {chapter.videos
-                .map(v => (
+        {/* Tabs */}
+        <div className="border-b border-gray-200 mb-6 flex space-x-6">
+          <button
+            onClick={() => setActiveTab('about')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center space-x-2 ${
+              activeTab === 'about' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Info className="w-4 h-4" />
+            <span>About</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('notes')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center space-x-2 ${
+              activeTab === 'notes' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Notes</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('list')}
+            className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center space-x-2 ${
+              activeTab === 'list' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <ListVideo className="w-4 h-4" />
+            <span>All Videos</span>
+          </button>
+        </div>
+
+        {/* Tab Content */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
+          {activeTab === 'about' && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900">Lesson Details</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-gray-500 block mb-1">Subject</span>
+                  <span className="font-medium text-gray-900">{subject.name}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block mb-1">Cycle</span>
+                  <span className="font-medium text-gray-900">{cycle.name}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block mb-1">Chapter</span>
+                  <span className="font-medium text-gray-900">{chapter.name}</span>
+                </div>
+                <div>
+                  <span className="text-gray-500 block mb-1">Duration</span>
+                  <span className="font-medium text-gray-900">{video.duration}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'notes' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-gray-900">Personal Notes</h3>
+                <button 
+                  onClick={clearNotes}
+                  className="text-sm text-red-600 hover:text-red-700 font-medium"
+                >
+                  Clear Notes
+                </button>
+              </div>
+              <textarea
+                value={notesText}
+                onChange={handleNotesChange}
+                placeholder="Type your notes here... They are saved automatically."
+                className="w-full h-48 p-4 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
+              />
+            </div>
+          )}
+
+          {activeTab === 'list' && (
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Videos in {chapter.name}</h3>
+              {allVideos.map((v: any, idx: number) => {
+                const isPlaying = v.id === video.id;
+                const isDone = isCompleted(v.id);
+                
+                return (
                   <Link
                     key={v.id}
-                    to={`/video/${v.id}`}
-                    className={`flex gap-3 p-2 rounded-lg transition-colors ${
-                      v.id === video.id 
-                        ? 'bg-primary/10 border border-primary/20' 
-                        : 'hover:bg-background border border-transparent'
+                    to={`/watch/${v.id}`}
+                    className={`flex items-center justify-between p-3 rounded-lg transition-colors ${
+                      isPlaying ? 'bg-primary/5 border border-primary/20' : 'hover:bg-gray-50 border border-transparent'
                     }`}
                   >
-                    <div className="relative w-24 h-16 shrink-0 rounded bg-black flex items-center justify-center overflow-hidden">
-                      {v.id === video.id ? (
-                        <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                          <span className="text-xs font-bold text-primary">PLAYING</span>
-                        </div>
-                      ) : (
-                        <PlayCircle size={20} className="text-white/50" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className={`text-sm font-medium truncate ${v.id === video.id ? 'text-primary' : 'text-text-primary'}`}>
+                    <div className="flex items-center space-x-4">
+                      <div className="w-8 text-center text-sm font-medium text-gray-400">
+                        {(idx + 1).toString().padStart(2, '0')}
+                      </div>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        isDone ? 'bg-success/10 text-success' : isPlaying ? 'bg-primary text-white' : 'bg-gray-100 text-gray-400'
+                      }`}>
+                        {isDone ? <CheckCircle className="w-5 h-5" /> : <PlayCircle className="w-5 h-5" />}
+                      </div>
+                      <span className={`font-medium ${isPlaying ? 'text-primary' : isDone ? 'text-gray-900' : 'text-gray-700'}`}>
                         {v.title}
-                      </h4>
-                      <p className="text-xs text-text-secondary mt-1">Part {v.display_order}</p>
+                      </span>
                     </div>
+                    <span className="text-sm text-gray-500">{v.duration}</span>
                   </Link>
-                ))}
+                );
+              })}
             </div>
-          </div>
+          )}
         </div>
-      </div>
+
+        {/* Prev / Next Navigation */}
+        <div className="flex items-center justify-between space-x-4">
+          <button
+            onClick={() => prevVideo && navigate(`/watch/${prevVideo.id}`)}
+            disabled={!prevVideo}
+            className={`flex-1 py-3 px-4 rounded-lg font-medium flex items-center justify-center transition-colors ${
+              prevVideo 
+                ? 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm' 
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            ← Previous Video
+          </button>
+          <button
+            onClick={() => nextVideo && navigate(`/watch/${nextVideo.id}`)}
+            disabled={!nextVideo}
+            className={`flex-1 py-3 px-4 rounded-lg font-medium flex items-center justify-center transition-colors ${
+              nextVideo 
+                ? 'bg-primary text-white hover:bg-primary/90 shadow-sm' 
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            Next Video →
+          </button>
+        </div>
+      </main>
     </div>
   );
-};
+}

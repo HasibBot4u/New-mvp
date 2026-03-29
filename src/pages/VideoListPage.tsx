@@ -1,105 +1,157 @@
-import React, { useMemo } from 'react';
-import { useParams, Link, Navigate } from 'react-router-dom';
+import { useMemo, useState, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { Play, Clock, ArrowLeft, CheckCircle } from 'lucide-react';
 import { useCatalog } from '../contexts/CatalogContext';
-import { Breadcrumb } from '../components/layout/Breadcrumb';
+import { useVideoProgress } from '../hooks/useVideoProgress';
+import { Breadcrumb } from '../components/ui/Breadcrumb';
 import { Skeleton } from '../components/ui/Skeleton';
-import { PlayCircle, Clock } from 'lucide-react';
-import { Badge } from '../components/ui/Badge';
 
-export const VideoListPage: React.FC = () => {
-  const { subjectId, cycleId, chapterId } = useParams<{ subjectId: string; cycleId: string; chapterId: string }>();
+export function VideoListPage() {
+  const { chapterId } = useParams<{ chapterId: string }>();
+  const navigate = useNavigate();
   const { catalog, isLoading } = useCatalog();
+  const { isCompleted, getProgress } = useVideoProgress();
+  const [visible, setVisible] = useState(false);
 
-  const subject = useMemo(() => {
-    return catalog?.subjects.find((s) => s.id === subjectId);
-  }, [catalog, subjectId]);
+  useEffect(() => {
+    setVisible(true);
+  }, []);
 
-  const cycle = useMemo(() => {
-    return subject?.cycles.find((c) => c.id === cycleId);
-  }, [subject, cycleId]);
+  const data = useMemo(() => {
+    if (!catalog || !chapterId) return null;
 
-  const chapter = useMemo(() => {
-    return cycle?.chapters.find((c) => c.id === chapterId);
-  }, [cycle, chapterId]);
-
-  const videos = useMemo(() => {
-    return chapter?.videos || [];
-  }, [chapter]);
+    for (const subject of catalog.subjects) {
+      for (const cycle of subject.cycles) {
+        const chapter = cycle.chapters.find((c: any) => c.id === chapterId);
+        if (chapter) {
+          return { subject, cycle, chapter };
+        }
+      }
+    }
+    return null;
+  }, [catalog, chapterId]);
 
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        <Skeleton className="h-6 w-96 mb-8" />
-        <Skeleton className="h-10 w-64 mb-6" />
-        <div className="space-y-3">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Skeleton key={i} className="h-20 w-full rounded-lg" />
-          ))}
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <div className="h-16 bg-primary" />
+        <div className="max-w-4xl mx-auto p-4 space-y-4">
+          <Skeleton className="h-8 w-64 mb-6" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <div className="space-y-3 mt-6">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <Skeleton key={i} className="h-16 w-full rounded-lg" />
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!subject || !cycle || !chapter) {
-    return <Navigate to="/" replace />;
+  if (!data) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Chapter Not Found</h2>
+        <p className="text-gray-600 mb-6">The chapter you are looking for does not exist.</p>
+        <button 
+          onClick={() => navigate('/')}
+          className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+        >
+          Return Home
+        </button>
+      </div>
+    );
   }
 
+  const { subject, cycle, chapter } = data;
+  const videos = chapter.videos || [];
+  
+  const completedCount = videos.filter((v: any) => isCompleted(v.id)).length;
+  const progressPercent = videos.length > 0 ? Math.round((completedCount / videos.length) * 100) : 0;
+
   return (
-    <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <Breadcrumb
-          items={[
-            { label: subject.name, href: `/subject/${subject.id}` },
-            { label: cycle.name, href: `/subject/${subject.id}/cycle/${cycle.id}` },
-            { label: chapter.name }
-          ]}
-        />
-      </div>
+    <div className={`min-h-screen bg-gray-50 pb-20 transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+      <header className="bg-primary text-white h-16 flex items-center px-4 sticky top-0 z-30 shadow-md">
+        <button 
+          onClick={() => navigate(-1)}
+          className="p-2 -ml-2 hover:bg-white/10 rounded-full transition-colors mr-3"
+        >
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <h1 className="text-lg font-medium truncate">{chapter.name}</h1>
+      </header>
 
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-text-primary tracking-tight">{chapter.name}</h1>
-        <p className="text-text-secondary mt-2">{videos.length} videos available</p>
-      </div>
+      <main className="max-w-4xl mx-auto px-4 py-6">
+        <Breadcrumb items={[
+          { label: 'Home', href: '/' },
+          { label: subject.name, href: `/subject/${subject.id}` },
+          { label: cycle.name, href: `/cycle/${cycle.id}` },
+          { label: chapter.name }
+        ]} />
 
-      {videos.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-12 text-center">
-          <PlayCircle className="mx-auto h-12 w-12 text-text-muted mb-4" />
-          <h3 className="text-lg font-medium text-text-primary">No videos found</h3>
-          <p className="text-text-secondary mt-1">There are currently no videos available in this chapter.</p>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{chapter.name}</h1>
+          <p className="text-gray-600 mb-6">{subject.name} • {cycle.name}</p>
+          
+          <div className="flex items-center justify-between text-sm font-medium text-gray-700 mb-2">
+            <span>Progress</span>
+            <span>{completedCount} of {videos.length} videos completed</span>
+          </div>
+          <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-success transition-all duration-500 ease-out"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
         </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {videos.map((video) => (
-            <Link
-              key={video.id}
-              to={`/video/${video.id}`}
-              className="group flex items-center gap-4 rounded-lg border border-border bg-surface p-4 transition-all hover:border-primary/50 hover:shadow-sm"
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary group-hover:bg-primary group-hover:text-white transition-colors">
-                <PlayCircle size={20} />
-              </div>
-              
-              <div className="flex-1 min-w-0">
-                <h3 className="truncate text-base font-medium text-text-primary group-hover:text-primary transition-colors">
-                  {video.title}
-                </h3>
-              </div>
 
-              <div className="flex items-center gap-4 shrink-0">
-                {video.duration && (
-                  <div className="hidden sm:flex items-center text-xs text-text-secondary">
-                    <Clock size={14} className="mr-1" />
-                    {video.duration}
+        <div className="space-y-3">
+          {videos.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-xl border border-gray-100">
+              <p className="text-gray-500 font-medium">No videos available in this chapter yet.</p>
+            </div>
+          ) : (
+            videos.map((video: any, index: number) => {
+              const isDone = isCompleted(video.id);
+              const progress = getProgress(video.id);
+              const hasProgress = progress > 10 && !isDone;
+
+              return (
+                <Link
+                  key={video.id}
+                  to={`/watch/${video.id}`}
+                  className="group flex items-center p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:border-primary/30 hover:shadow-md transition-all duration-150 transform hover:-translate-y-0.5"
+                >
+                  <div className="w-10 text-center text-gray-400 font-medium mr-4">
+                    {(index + 1).toString().padStart(2, '0')}
                   </div>
-                )}
-                <Badge variant="outline" className="hidden sm:inline-flex">
-                  Part {video.display_order}
-                </Badge>
-              </div>
-            </Link>
-          ))}
+                  
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 mr-4 transition-colors ${
+                    isDone ? 'bg-success/10 text-success' : 'bg-primary/10 text-primary group-hover:bg-primary group-hover:text-white'
+                  }`}>
+                    {isDone ? <CheckCircle className="w-6 h-6" /> : <Play className="w-5 h-5 ml-1" />}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0 pr-4">
+                    <h3 className={`font-medium truncate mb-1 ${isDone ? 'text-success' : 'text-gray-900'}`}>
+                      {video.title}
+                    </h3>
+                    <div className="flex items-center text-sm text-gray-500">
+                      <Clock className="w-4 h-4 mr-1.5" />
+                      {video.duration}
+                      {hasProgress && (
+                        <span className="ml-3 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs font-semibold">
+                          Continue
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })
+          )}
         </div>
-      )}
+      </main>
     </div>
   );
-};
+}

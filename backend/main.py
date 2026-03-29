@@ -23,7 +23,7 @@ TEST_CHANNEL_ID = -1003569793885
 TEST_MESSAGE_ID = 3
 CHUNK_SIZE      = 1024 * 1024   # 1 MB per chunk
 CATALOG_TTL     = 300           # 5 minutes cache TTL
-INITIAL_BUFFER  = 10 * 1024 * 1024  # 10 MB initial chunk for fast start
+INITIAL_BUFFER  = 2 * 1024 * 1024  # 2MB — enough to start playing instantly
 
 # ─── STATE ────────────────────────────────────────────────────
 tg: Optional[Client] = None
@@ -140,6 +140,43 @@ async def fetch_all_videos(client: httpx.AsyncClient) -> list:
         offset += 1000
     return all_videos
 
+async def _prewarm_messages(video_items: list):
+    """
+    Background task: pre-fetches Telegram messages for all videos
+    so they are in message_cache before any user clicks play.
+    This eliminates the 2-3 second get_messages() delay on first play.
+    Fetches in small batches to avoid Telegram rate limiting.
+    """
+    print(f"[NexusEdu] Pre-warming {len(video_items)} video message(s)...")
+    fetched = 0
+    errors  = 0
+
+    for video_id, info in video_items:
+        channel_id_str = info.get("channel_id", "")
+        message_id     = info.get("message_id", 0)
+
+        if not channel_id_str or not message_id:
+            continue
+
+        key = f"{channel_id_str}_{message_id}"
+        if key in message_cache:
+            continue  # already cached, skip
+
+        try:
+            channel_id = int(channel_id_str)
+            await resolve_channel(channel_id)
+            msg = await tg.get_messages(channel_id, message_id)
+            if msg and not msg.empty:
+                message_cache[key] = msg
+                fetched += 1
+        except Exception as e:
+            errors += 1
+            print(f"[NexusEdu] Pre-warm failed for {key}: {e}")
+
+        # Small delay between fetches to avoid Telegram rate limiting
+        await asyncio.sleep(0.3)
+
+    print(f"[NexusEdu] Pre-warm complete: {fetched} cached, {errors} errors.")
 
 # ─── CATALOG BUILD ────────────────────────────────────────────
 async def refresh_catalog():
@@ -221,6 +258,10 @@ async def refresh_catalog():
             "timestamp": time.time(),
         }
         print(f"[NexusEdu] Catalog loaded: {len(videos)} video(s).")
+
+        # Pre-warm message cache for all videos so first play is instant.
+        # Run as background task — does not block catalog from serving.
+        asyncio.create_task(_prewarm_messages(list(video_map.items())))
 
     except Exception as e:
         print(f"[NexusEdu] Catalog load error: {e}")

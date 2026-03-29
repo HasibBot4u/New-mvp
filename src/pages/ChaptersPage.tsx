@@ -1,89 +1,140 @@
-import React, { useMemo } from 'react';
-import { useParams, Link, Navigate } from 'react-router-dom';
+import { useMemo, useState, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, PlayCircle } from 'lucide-react';
 import { useCatalog } from '../contexts/CatalogContext';
-import { Breadcrumb } from '../components/layout/Breadcrumb';
+import { useVideoProgress } from '../hooks/useVideoProgress';
+import { Breadcrumb } from '../components/ui/Breadcrumb';
 import { Skeleton } from '../components/ui/Skeleton';
-import { BookMarked } from 'lucide-react';
 
-export const ChaptersPage: React.FC = () => {
-  const { subjectId, cycleId } = useParams<{ subjectId: string; cycleId: string }>();
+export function ChaptersPage() {
+  const { cycleId } = useParams<{ cycleId: string }>();
+  const navigate = useNavigate();
   const { catalog, isLoading } = useCatalog();
+  const { isCompleted } = useVideoProgress();
+  const [visible, setVisible] = useState(false);
 
-  const subject = useMemo(() => {
-    return catalog?.subjects.find((s) => s.id === subjectId);
-  }, [catalog, subjectId]);
+  useEffect(() => {
+    setVisible(true);
+  }, []);
 
-  const cycle = useMemo(() => {
-    return subject?.cycles.find((c) => c.id === cycleId);
-  }, [subject, cycleId]);
+  const data = useMemo(() => {
+    if (!catalog || !cycleId) return null;
 
-  const chapters = useMemo(() => {
-    return cycle?.chapters || [];
-  }, [cycle]);
+    for (const subject of catalog.subjects) {
+      const cycle = subject.cycles.find((c: any) => c.id === cycleId);
+      if (cycle) {
+        return { subject, cycle };
+      }
+    }
+    return null;
+  }, [catalog, cycleId]);
 
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
-        <Skeleton className="h-6 w-64 mb-8" />
-        <Skeleton className="h-10 w-48 mb-6" />
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-xl" />
-          ))}
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <div className="h-16 bg-primary" />
+        <div className="max-w-4xl mx-auto p-4 space-y-4">
+          <Skeleton className="h-8 w-64 mb-6" />
+          <div className="space-y-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            ))}
+          </div>
         </div>
       </div>
     );
   }
 
-  if (!subject || !cycle) {
-    return <Navigate to="/" replace />;
+  if (!data) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">Cycle Not Found</h2>
+        <p className="text-gray-600 mb-6">The cycle you are looking for does not exist.</p>
+        <button 
+          onClick={() => navigate('/')}
+          className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+        >
+          Return Home
+        </button>
+      </div>
+    );
   }
 
+  const { subject, cycle } = data;
+
   return (
-    <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mb-8">
-        <Breadcrumb
-          items={[
-            { label: subject.name, href: `/subject/${subject.id}` },
-            { label: cycle.name }
-          ]}
-        />
-      </div>
+    <div className={`min-h-screen bg-gray-50 pb-20 transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+      <header className="bg-primary text-white h-16 flex items-center px-4 sticky top-0 z-30 shadow-md">
+        <button 
+          onClick={() => navigate(-1)}
+          className="p-2 -ml-2 hover:bg-white/10 rounded-full transition-colors mr-3"
+        >
+          <ArrowLeft className="w-6 h-6" />
+        </button>
+        <h1 className="text-lg font-medium truncate">{cycle.name}</h1>
+      </header>
 
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-text-primary tracking-tight">Chapters</h1>
-        <p className="text-text-secondary mt-2">Select a chapter to view videos</p>
-      </div>
+      <main className="max-w-4xl mx-auto px-4 py-6">
+        <Breadcrumb items={[
+          { label: 'Home', href: '/' },
+          { label: subject.name, href: `/subject/${subject.id}` },
+          { label: cycle.name }
+        ]} />
 
-      {chapters.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-12 text-center">
-          <BookMarked className="mx-auto h-12 w-12 text-text-muted mb-4" />
-          <h3 className="text-lg font-medium text-text-primary">No chapters found</h3>
-          <p className="text-text-secondary mt-1">There are currently no chapters available for this cycle.</p>
-        </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {chapters.map((chapter) => (
-            <Link
-              key={chapter.id}
-              to={`/subject/${subjectId}/cycle/${cycleId}/chapter/${chapter.id}`}
-              className="group flex items-start gap-4 rounded-xl border border-border bg-surface p-5 transition-all hover:border-primary/50 hover:shadow-sm"
-            >
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <BookMarked size={24} />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-lg font-semibold text-text-primary group-hover:text-primary transition-colors">
-                  {chapter.name}
-                </h2>
-                <div className="mt-2 text-xs font-medium text-text-muted">
-                  Chapter {chapter.display_order}
-                </div>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+        <h1 className="text-2xl font-bold text-gray-900 mb-6">{cycle.name} Chapters</h1>
+
+        {cycle.chapters.length === 0 ? (
+          <div className="text-center py-12 bg-white rounded-xl border border-gray-100">
+            <p className="text-gray-500 font-medium">No content yet. Check back soon! 📚</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {cycle.chapters.map((chapter: any) => {
+              const totalVideos = chapter.videos.length;
+              let completedVideos = 0;
+              
+              chapter.videos.forEach((v: any) => {
+                if (isCompleted(v.id)) completedVideos++;
+              });
+
+              const percent = totalVideos > 0 ? Math.round((completedVideos / totalVideos) * 100) : 0;
+
+              return (
+                <Link
+                  key={chapter.id}
+                  to={`/chapter/${chapter.id}`}
+                  className="group block bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md hover:border-primary/30 transition-all duration-200 hover:-translate-y-1"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-xl font-bold text-gray-900 group-hover:text-primary transition-colors">
+                      {chapter.name}
+                    </h3>
+                    <div className="flex items-center text-sm font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                      <PlayCircle className="w-4 h-4 mr-1.5" />
+                      {totalVideos} classes
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4">
+                    <div className="flex justify-between text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">
+                      <span>Progress</span>
+                      <span className={percent === 100 ? 'text-success' : 'text-primary'}>
+                        {completedVideos} of {totalVideos} completed
+                      </span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-500 ease-out ${percent === 100 ? 'bg-success' : 'bg-primary'}`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </main>
     </div>
   );
-};
+}

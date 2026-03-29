@@ -2,13 +2,15 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CatalogProvider } from './contexts/CatalogContext';
-import { Topbar } from './components/layout/Topbar';
+import { ToastProvider } from './components/ui/Toast';
+import { BottomNav } from './components/layout/BottomNav';
 import { HomePage } from './pages/HomePage';
 import { CyclesPage } from './pages/CyclesPage';
 import { ChaptersPage } from './pages/ChaptersPage';
 import { VideoListPage } from './pages/VideoListPage';
 import { PlayerPage } from './pages/PlayerPage';
 import { LoginPage } from './pages/LoginPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { AdminLayout } from './pages/admin/AdminLayout';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminContent } from './pages/admin/AdminContent';
@@ -32,16 +34,16 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-background text-text-primary flex flex-col">
-      <Topbar />
       <main className="flex-1">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           
           <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
           <Route path="/subject/:subjectId" element={<ProtectedRoute><CyclesPage /></ProtectedRoute>} />
-          <Route path="/subject/:subjectId/cycle/:cycleId" element={<ProtectedRoute><ChaptersPage /></ProtectedRoute>} />
-          <Route path="/subject/:subjectId/cycle/:cycleId/chapter/:chapterId" element={<ProtectedRoute><VideoListPage /></ProtectedRoute>} />
-          <Route path="/video/:videoId" element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
+          <Route path="/cycle/:cycleId" element={<ProtectedRoute><ChaptersPage /></ProtectedRoute>} />
+          <Route path="/chapter/:chapterId" element={<ProtectedRoute><VideoListPage /></ProtectedRoute>} />
+          <Route path="/watch/:videoId" element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
 
           <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
             <Route index element={<AdminDashboard />} />
@@ -53,6 +55,7 @@ const AppContent: React.FC = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+      <BottomNav />
     </div>
   );
 };
@@ -61,9 +64,11 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <CatalogProvider>
-        <Router>
-          <AppContent />
-        </Router>
+        <ToastProvider>
+          <Router>
+            <AppContent />
+          </Router>
+        </ToastProvider>
       </CatalogProvider>
     </AuthProvider>
   );
