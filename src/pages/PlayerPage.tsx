@@ -1,17 +1,20 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useCatalog } from '../contexts/CatalogContext';
 import { useAuth } from '../contexts/AuthContext';
 import { logActivity, saveProgress } from '../lib/supabase';
 import { Breadcrumb } from '../components/layout/Breadcrumb';
-import { VideoPlayer } from '../components/video/VideoPlayer';
 import { Skeleton } from '../components/ui/Skeleton';
 import { FileText, Clock, AlertCircle, PlayCircle } from 'lucide-react';
 
 export const PlayerPage: React.FC = () => {
   const { videoId } = useParams<{ videoId: string }>();
-  const { catalog, isLoading } = useCatalog();
+  const { catalog, isLoading: isCatalogLoading } = useCatalog();
   const { user } = useAuth();
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const { subject, cycle, chapter, video } = useMemo(() => {
     if (!catalog) return { subject: null, cycle: null, chapter: null, video: null };
@@ -38,8 +41,34 @@ export const PlayerPage: React.FC = () => {
     });
   }, [user, video]);
 
-  const handleProgress = async (currentTime: number, duration: number) => {
-    if (!user || !video || duration <= 0) return;
+  // Reset state when video changes
+  useEffect(() => {
+    setIsLoading(true);
+    setError(null);
+  }, [videoId]);
+
+  // 30-second timeout for video loading
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    
+    if (isLoading && !error) {
+      timeoutId = setTimeout(() => {
+        setError("Video is taking too long. Tap Retry.");
+        setIsLoading(false);
+      }, 30000);
+    }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [isLoading, error]);
+
+  const handleTimeUpdate = async () => {
+    if (!user || !video || !videoRef.current) return;
+    const currentTime = videoRef.current.currentTime;
+    const duration = videoRef.current.duration;
+    
+    if (duration <= 0) return;
     
     // Only update history every 10 seconds to avoid spamming the DB
     if (Math.floor(currentTime) % 10 !== 0) return;
@@ -48,7 +77,26 @@ export const PlayerPage: React.FC = () => {
     await saveProgress(user.id, video.id, progressPercent);
   };
 
-  if (isLoading) {
+  const handleVideoEnd = async () => {
+    if (!user || !video) return;
+    await saveProgress(user.id, video.id, 100);
+  };
+
+  const handleVideoError = () => {
+    setError("Failed to load video stream. The backend server might be sleeping or unreachable.");
+    setIsLoading(false);
+  };
+
+  const handleRetry = () => {
+    setError(null);
+    setIsLoading(true);
+    if (videoRef.current && videoId) {
+      videoRef.current.src = `https://nexusedu-backend-0bjq.onrender.com/api/stream/${videoId}`;
+      videoRef.current.load();
+    }
+  };
+
+  if (isCatalogLoading) {
     return (
       <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 max-w-5xl">
         <Skeleton className="h-6 w-96 mb-6" />
@@ -72,6 +120,8 @@ export const PlayerPage: React.FC = () => {
     );
   }
 
+  const streamUrl = `https://nexusedu-backend-0bjq.onrender.com/api/stream/${videoId}`;
+
   return (
     <div className="container mx-auto px-4 py-6 sm:px-6 lg:px-8 max-w-6xl">
       <div className="mb-6">
@@ -88,10 +138,46 @@ export const PlayerPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2">
           <div className="mb-6">
-            <VideoPlayer 
-              videoId={video.id} 
-              onProgress={handleProgress}
-            />
+            <div className="relative w-full overflow-hidden rounded-xl bg-black aspect-video shadow-lg">
+              {error ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface text-text-primary p-6 text-center z-10">
+                  <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+                  <p className="font-medium mb-4">{error}</p>
+                  <button 
+                    onClick={handleRetry}
+                    className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : null}
+
+              <video
+                ref={videoRef}
+                controls
+                playsInline
+                preload="auto"
+                src={streamUrl}
+                style={{ width: '100%', aspectRatio: '16/9', backgroundColor: '#000' }}
+                onError={handleVideoError}
+                onCanPlay={() => { setIsLoading(false); setError(null); }}
+                onWaiting={() => setIsLoading(true)}
+                onPlaying={() => { setIsLoading(false); setError(null); }}
+                onTimeUpdate={handleTimeUpdate}
+                onEnded={handleVideoEnd}
+                onContextMenu={(e) => e.preventDefault()}
+              />
+              
+              {isLoading && !error && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 pointer-events-none z-10">
+                  <svg className="w-12 h-12 text-white animate-spin mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <p className="text-white font-medium">Loading from Telegram... 10-15 seconds</p>
+                </div>
+              )}
+            </div>
           </div>
 
           <div>

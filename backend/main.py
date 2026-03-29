@@ -1,134 +1,259 @@
-# FILE: backend/main.py
-import os
-import time
 import asyncio
+import math
+import time
+import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pyrogram import Client
+from typing import Optional, Tuple
+
 import httpx
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+from pyrogram import Client
 
-TELEGRAM_API_ID = int(os.environ.get("TELEGRAM_API_ID", "0"))
-TELEGRAM_API_HASH = os.environ.get("TELEGRAM_API_HASH", "")
-PYROGRAM_SESSION_STRING = os.environ.get("PYROGRAM_SESSION_STRING", "")
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+# ─── CONFIG ───────────────────────────────────────────────────
+API_ID          = int(os.environ.get("TELEGRAM_API_ID", "38432903"))
+API_HASH        = os.environ.get("TELEGRAM_API_HASH", "c4d395153850472118de00e8c84aed54")
+SESSION_STRING  = os.environ.get("PYROGRAM_SESSION_STRING", "")
+SUPABASE_URL    = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY    = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
-tg = None
+TEST_CHANNEL_ID = -1003569793885
+TEST_MESSAGE_ID = 3
+CHUNK_SIZE      = 1024 * 1024   # 1 MB per chunk
+CATALOG_TTL     = 300           # 5 minutes cache TTL
+INITIAL_BUFFER  = 10 * 1024 * 1024  # 10 MB initial chunk for fast start
+
+# ─── STATE ────────────────────────────────────────────────────
+tg: Optional[Client] = None
+catalog_cache   = {"data": None, "timestamp": 0}
+video_map       = {}   # uuid → {channel_id, message_id}
+message_cache   = {}   # "channelid_msgid" → message object
 resolved_channels = set()
-catalog_cache = {"data": None, "timestamp": 0}
-video_map = {}
-message_cache = {}
-CHUNK_SIZE = 1024 * 1024
-CATALOG_TTL = 300
 
-async def resolve_channel(channel_id: str):
-    if channel_id in resolved_channels:
+# ─── CORS HEADERS (added to every streaming response manually) ─
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin":   "*",
+    "Access-Control-Allow-Headers":  "*",
+    "Access-Control-Allow-Methods":  "GET, HEAD, OPTIONS",
+    "Access-Control-Expose-Headers": (
+        "Content-Range, Accept-Ranges, Content-Length, Content-Type"
+    ),
+}
+
+# ─── TELEGRAM HELPERS ─────────────────────────────────────────
+async def resolve_channel(channel_id: int | str) -> bool:
+    """Introduce Pyrogram to a channel so get_messages() works."""
+    cid = int(str(channel_id))
+    if cid in resolved_channels:
         return True
     try:
-        await tg.get_chat(int(channel_id))
-        resolved_channels.add(channel_id)
+        await tg.get_chat(cid)
+        resolved_channels.add(cid)
+        print(f"[NexusEdu] Resolved channel {cid}")
         return True
     except Exception as e:
-        print(f"Cannot resolve {channel_id}: {e}")
+        print(f"[NexusEdu] Could not resolve {cid}: {e}")
         return False
 
-async def fetch_from_supabase():
-    global video_map
-    headers = {
-        "apikey": SUPABASE_SERVICE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"
-    }
-    
-    async with httpx.AsyncClient() as client:
-        # Fetch subjects
-        res = await client.get(f"{SUPABASE_URL}/rest/v1/subjects?select=*&order=display_order.asc", headers=headers)
-        res.raise_for_status()
-        subjects = res.json()
-        
-        # Fetch cycles
-        res = await client.get(f"{SUPABASE_URL}/rest/v1/cycles?select=*&order=display_order.asc", headers=headers)
-        res.raise_for_status()
-        cycles = res.json()
-        
-        # Fetch chapters
-        res = await client.get(f"{SUPABASE_URL}/rest/v1/chapters?select=*&order=display_order.asc", headers=headers)
-        res.raise_for_status()
-        chapters = res.json()
-        
-        # Fetch videos (paginated)
-        videos = []
-        offset = 0
-        limit = 1000
-        while True:
-            res = await client.get(f"{SUPABASE_URL}/rest/v1/videos?select=*&order=display_order.asc&offset={offset}&limit={limit}", headers=headers)
-            res.raise_for_status()
-            batch = res.json()
-            videos.extend(batch)
-            if len(batch) < limit:
-                break
-            offset += limit
-            
-        # Assemble hierarchy
-        new_video_map = {}
-        
-        for subject in subjects:
-            subject["cycles"] = [c for c in cycles if c["subject_id"] == subject["id"]]
-            for cycle in subject["cycles"]:
-                cycle["chapters"] = [ch for ch in chapters if ch["cycle_id"] == cycle["id"]]
-                for chapter in cycle["chapters"]:
-                    chapter["videos"] = [v for v in videos if v["chapter_id"] == chapter["id"]]
-                    for video in chapter["videos"]:
-                        new_video_map[str(video["id"])] = {
-                            "channel_id": video.get("telegram_channel_id") or cycle.get("telegram_channel_id"),
-                            "message_id": video.get("telegram_message_id")
-                        }
-                        
-        video_map.clear()
-        video_map.update(new_video_map)
-        
-        return {
-            "subjects": subjects,
-            "total_videos": len(videos)
-        }
 
-async def refresh_catalog():
+async def preload_channels():
+    """Load all channels from dialogs on startup."""
     try:
-        data = await fetch_from_supabase()
-        catalog_cache["data"] = data
-        catalog_cache["timestamp"] = time.time()
-        
-        # Resolve all channels
-        for vid, info in video_map.items():
-            if info["channel_id"]:
-                await resolve_channel(str(info["channel_id"]))
-                
-        print(f"[NexusEdu] Catalog refreshed. {len(video_map)} videos loaded.")
+        async for dialog in tg.get_dialogs():
+            try:
+                cid = dialog.chat.id
+                resolved_channels.add(cid)
+            except Exception:
+                pass
+        print(f"[NexusEdu] Resolved {len(resolved_channels)} channel(s) from dialogs.")
     except Exception as e:
-        print(f"[NexusEdu] Error refreshing catalog: {e}")
+        print(f"[NexusEdu] Dialog preload error: {e}")
 
+
+async def get_message(channel_id: int, message_id: int):
+    """Fetch and cache a Telegram message."""
+    key = f"{channel_id}_{message_id}"
+    if key not in message_cache:
+        msg = await tg.get_messages(channel_id, message_id)
+        message_cache[key] = msg
+    return message_cache[key]
+
+
+async def get_file_info(channel_id: int, message_id: int) -> Tuple[int, str]:
+    """
+    Returns (file_size_bytes, mime_type).
+    Handles both video and document media types.
+    Videos uploaded as FILES in Telegram appear as 'document' type —
+    we detect this and force video/mp4 MIME type for browser playback.
+    """
+    msg = await get_message(channel_id, message_id)
+
+    if msg.video:
+        return msg.video.file_size, "video/mp4"
+
+    if msg.document:
+        mime = msg.document.mime_type or "video/mp4"
+        # Force video MIME even if Telegram classified as generic document
+        if "video" not in mime.lower():
+            mime = "video/mp4"
+        return msg.document.file_size, mime
+
+    return 0, "video/mp4"
+
+
+# ─── SUPABASE FETCH ───────────────────────────────────────────
+async def fetch_supabase(path: str, client: httpx.AsyncClient) -> list:
+    headers = {
+        "apikey":        SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    }
+    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    r = await client.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+async def fetch_all_videos(client: httpx.AsyncClient) -> list:
+    """Paginated fetch — handles 1,458+ videos without hitting row limits."""
+    headers = {
+        "apikey":        SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+    }
+    all_videos = []
+    offset = 0
+    while True:
+        url = (
+            f"{SUPABASE_URL}/rest/v1/videos"
+            f"?is_active=eq.true&order=display_order"
+            f"&offset={offset}&limit=1000"
+        )
+        r = await client.get(url, headers=headers, timeout=30)
+        r.raise_for_status()
+        batch = r.json()
+        if not batch:
+            break
+        all_videos.extend(batch)
+        if len(batch) < 1000:
+            break
+        offset += 1000
+    return all_videos
+
+
+# ─── CATALOG BUILD ────────────────────────────────────────────
+async def refresh_catalog():
+    global catalog_cache, video_map
+
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("[NexusEdu] Supabase not configured — skipping catalog load.")
+        return
+
+    try:
+        async with httpx.AsyncClient() as client:
+            subjects = await fetch_supabase(
+                "subjects?is_active=eq.true&order=display_order", client)
+            cycles   = await fetch_supabase(
+                "cycles?is_active=eq.true&order=display_order", client)
+            chapters = await fetch_supabase(
+                "chapters?is_active=eq.true&order=display_order", client)
+            videos   = await fetch_all_videos(client)
+
+        # Build video_map for O(1) stream lookups by UUID
+        new_map = {}
+        for v in videos:
+            new_map[v["id"]] = {
+                "channel_id": v.get("telegram_channel_id", ""),
+                "message_id": v.get("telegram_message_id", 0),
+            }
+        video_map = new_map
+
+        # Resolve all Telegram channels found in cycles table
+        unique_channels = {
+            c.get("telegram_channel_id")
+            for c in cycles
+            if c.get("telegram_channel_id")
+        }
+        for cid in unique_channels:
+            await resolve_channel(cid)
+
+        # Assemble nested hierarchy: subjects → cycles → chapters → videos
+        result = []
+        for subj in subjects:
+            s_cycles = sorted(
+                [c for c in cycles if c["subject_id"] == subj["id"]],
+                key=lambda x: x.get("display_order", 0),
+            )
+            subj_data = {**subj, "cycles": []}
+
+            for cyc in s_cycles:
+                c_chapters = sorted(
+                    [ch for ch in chapters if ch["cycle_id"] == cyc["id"]],
+                    key=lambda x: x.get("display_order", 0),
+                )
+                cyc_data = {**cyc, "chapters": []}
+
+                for chap in c_chapters:
+                    c_videos = sorted(
+                        [v for v in videos if v["chapter_id"] == chap["id"]],
+                        key=lambda x: x.get("display_order", 0),
+                    )
+                    chap_data = {
+                        **chap,
+                        "videos": [
+                            {
+                                "id":       v["id"],
+                                "title":    v["title"],
+                                "duration": v.get("duration", "00:00:00"),
+                                "size_mb":  v.get("size_mb", 0),
+                            }
+                            for v in c_videos
+                        ],
+                    }
+                    cyc_data["chapters"].append(chap_data)
+
+                subj_data["cycles"].append(cyc_data)
+
+            result.append(subj_data)
+
+        catalog_cache = {
+            "data":      {"subjects": result, "total_videos": len(videos)},
+            "timestamp": time.time(),
+        }
+        print(f"[NexusEdu] Catalog loaded: {len(videos)} video(s).")
+
+    except Exception as e:
+        print(f"[NexusEdu] Catalog load error: {e}")
+
+
+# ─── LIFESPAN (startup / shutdown) ────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global tg
-    tg = Client("session", session_string=PYROGRAM_SESSION_STRING, api_id=TELEGRAM_API_ID, api_hash=TELEGRAM_API_HASH, in_memory=False, workdir="/tmp")
+
+    print("[NexusEdu] Starting Telegram client...")
+    tg = Client(
+        "nexusedu_session",
+        api_id=API_ID,
+        api_hash=API_HASH,
+        session_string=SESSION_STRING,
+        in_memory=True,
+    )
     await tg.start()
-    print("[NexusEdu] Telegram client connected")
-    
-    await resolve_channel("-1003569793885")
-    
-    try:
-        async for dialog in tg.get_dialogs(limit=100):
-            if hasattr(dialog.chat, 'id'):
-                resolved_channels.add(str(dialog.chat.id))
-    except Exception as e:
-        print(f"[NexusEdu] Error loading dialogs: {e}")
-        
+    print("[NexusEdu] Telegram client started.")
+
+    await preload_channels()
+    await resolve_channel(TEST_CHANNEL_ID)
     await refresh_catalog()
-    yield
+
+    yield  # ← server runs here
+
+    print("[NexusEdu] Stopping Telegram client...")
     await tg.stop()
 
-app = FastAPI(lifespan=lifespan)
+
+# ─── APP ──────────────────────────────────────────────────────
+app = FastAPI(title="NexusEdu Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -136,218 +261,276 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "HEAD", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"]
+    expose_headers=[
+        "Content-Range", "Accept-Ranges",
+        "Content-Length", "Content-Type",
+    ],
 )
 
-def parse_range(range_header: str, file_size: int):
-    range_match = range_header.strip().split("=")[-1]
-    start_str, end_str = range_match.split("-")
-    start = int(start_str) if start_str else 0
-    end = int(end_str) if end_str else file_size - 1
-    if end >= file_size:
-        end = file_size - 1
-    return start, end
 
-async def stream_telegram_video(message, start=0, end=None):
-    total = message.video.file_size if message.video else message.document.file_size
-    if end is None:
-        end = total - 1
-    length = end - start + 1
-    
+# ─── STREAMING CORE ───────────────────────────────────────────
+async def _stream_telegram(
+    channel_id: int, message_id: int,
+    start: int, end: int, total: int
+):
+    """
+    Async generator that pulls 1MB chunks from Telegram and yields bytes.
+    Handles:
+      - Correct chunk offset for byte-accurate seeking
+      - Skipping leading bytes in first chunk for non-aligned Range starts
+      - Stopping exactly at the requested end byte
+    """
     chunk_offset = start // CHUNK_SIZE
-    skip_bytes = start % CHUNK_SIZE
-    
-    bytes_sent = 0
+    skip_bytes   = start % CHUNK_SIZE
+    needed       = math.ceil((end - start + 1 + skip_bytes) / CHUNK_SIZE)
+
+    msg = await get_message(channel_id, message_id)
+
+    bytes_sent  = 0
+    target      = end - start + 1
     first_chunk = True
-    
-    async for chunk in tg.stream_media(message, offset=chunk_offset):
+
+    async for chunk in tg.stream_media(
+        msg, offset=chunk_offset, limit=needed
+    ):
         data = bytes(chunk)
-        if first_chunk and skip_bytes > 0:
-            data = data[skip_bytes:]
+
+        # Skip leading bytes of first chunk for byte-aligned range start
+        if first_chunk and skip_bytes:
+            data        = data[skip_bytes:]
             first_chunk = False
-        if bytes_sent + len(data) > length:
-            data = data[:length - bytes_sent]
-        bytes_sent += len(data)
-        yield data
-        if bytes_sent >= length:
+
+        # Trim last chunk to exact requested length
+        remaining = target - bytes_sent
+        if len(data) > remaining:
+            data = data[:remaining]
+
+        if not data:
             break
 
-@app.get("/")
-async def root():
-    return {"service": "NexusEdu Backend", "status": "running", "version": "2.0"}
+        bytes_sent += len(data)
+        yield data
 
-@app.get("/api/health")
+        if bytes_sent >= target:
+            break
+
+
+def _parse_range(range_header: str, total: int) -> Tuple[int, int]:
+    """Parse 'bytes=X-Y' or 'bytes=X-' into (start, end)."""
+    val   = range_header.replace("bytes=", "")
+    parts = val.split("-")
+    start = int(parts[0]) if parts[0] else 0
+    end   = int(parts[1]) if len(parts) > 1 and parts[1] else total - 1
+    end   = min(end, total - 1)
+    return start, end
+
+
+# ─── ENDPOINTS ────────────────────────────────────────────────
+
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root():
+    return {"service": "NexusEdu Backend", "status": "running"}
+
+
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
+    connected = tg is not None and tg.is_connected
     return {
-        "status": "ok",
-        "telegram": "connected" if tg and tg.is_connected else "disconnected",
-        "videos_cached": len(video_map),
+        "status":            "ok" if connected else "degraded",
+        "telegram":          "connected" if connected else "disconnected",
+        "videos_cached":     len(video_map),
         "channels_resolved": len(resolved_channels),
-        "cache_age_seconds": int(time.time() - catalog_cache["timestamp"])
+        "catalog_age_seconds": (
+            round(time.time() - catalog_cache["timestamp"])
+            if catalog_cache["timestamp"] else None
+        ),
     }
 
+
+@app.get("/api/debug")
+async def debug():
+    info = {
+        "telegram_connected":     False,
+        "test_channel_resolved":  int(str(TEST_CHANNEL_ID)) in resolved_channels,
+        "test_message_found":     False,
+        "test_message_has_media": False,
+        "resolved_channels":      [str(c) for c in resolved_channels],
+        "channels_count":         len(resolved_channels),
+        "videos_cached":          len(video_map),
+        "messages_cached":        len(message_cache),
+        "catalog_age_seconds":    (
+            round(time.time() - catalog_cache["timestamp"])
+            if catalog_cache["timestamp"] else None
+        ),
+        "catalog_loaded":         catalog_cache["data"] is not None,
+        "errors":                 [],
+    }
+
+    try:
+        info["telegram_connected"] = tg.is_connected
+    except Exception as e:
+        info["errors"].append(f"telegram check: {e}")
+
+    try:
+        await resolve_channel(TEST_CHANNEL_ID)
+        info["test_channel_resolved"] = True
+        msg = await get_message(TEST_CHANNEL_ID, TEST_MESSAGE_ID)
+        if msg and not msg.empty:
+            info["test_message_found"] = True
+            media = msg.video or msg.document
+            if media:
+                info["test_message_has_media"] = True
+                info["media_type"]   = "video" if msg.video else "document"
+                info["file_size_mb"] = round(media.file_size / 1024 / 1024, 1)
+    except Exception as e:
+        info["errors"].append(f"message check: {e}")
+
+    try:
+        me = await tg.get_me()
+        info["logged_in_as"] = f"{me.first_name} (ID: {me.id})"
+    except Exception as e:
+        info["errors"].append(f"get_me: {e}")
+
+    return JSONResponse(info)
+
+
 @app.get("/api/catalog")
-async def get_catalog():
-    if time.time() - catalog_cache["timestamp"] > CATALOG_TTL:
+async def catalog():
+    now = time.time()
+    if (
+        catalog_cache["data"] is None
+        or now - catalog_cache["timestamp"] > CATALOG_TTL
+    ):
         await refresh_catalog()
-    return catalog_cache["data"]
+    return catalog_cache["data"] or {"subjects": [], "total_videos": 0}
+
 
 @app.get("/api/refresh")
 async def force_refresh():
-    catalog_cache["timestamp"] = 0
     await refresh_catalog()
     return {"status": "refreshed", "videos": len(video_map)}
 
+
 @app.get("/api/stream/{video_id}")
 async def stream_video(video_id: str, request: Request):
+    # ── Lookup video in map ────────────────────────────────────
+    if video_id not in video_map:
+        await refresh_catalog()
+    if video_id not in video_map:
+        raise HTTPException(404, "Video not found")
+
+    info       = video_map[video_id]
+    channel_id = int(info["channel_id"])
+    message_id = int(info["message_id"])
+
+    if not channel_id or not message_id:
+        raise HTTPException(400, "Video not linked to Telegram — add message_id and channel_id in admin panel")
+
+    await resolve_channel(channel_id)
+
     try:
-        if video_id not in video_map:
-            await refresh_catalog()
-            if video_id not in video_map:
-                raise HTTPException(404, "Video not found")
-                
-        info = video_map[video_id]
-        channel_id = info.get("channel_id")
-        message_id = info.get("message_id")
-        
-        if not channel_id or not message_id:
-            raise HTTPException(400, "Video not linked to Telegram")
-            
-        await resolve_channel(str(channel_id))
-        
-        cache_key = f"{channel_id}_{message_id}"
-        if cache_key in message_cache:
-            message = message_cache[cache_key]
-        else:
-            message = await tg.get_messages(int(channel_id), int(message_id))
-            if not message or message.empty:
-                raise HTTPException(404, "Telegram message not found")
-            message_cache[cache_key] = message
-            
-        file_size = message.video.file_size if message.video else message.document.file_size
-        
+        total, mime_type = await get_file_info(channel_id, message_id)
+        if not total:
+            raise HTTPException(500, "Could not read file size from Telegram")
+
         range_header = request.headers.get("range")
+
         if range_header:
-            start, end = parse_range(range_header, file_size)
-            status_code = 206
+            # ── Seeking request (HTTP 206) ─────────────────────
+            start, end = _parse_range(range_header, total)
+            length = end - start + 1
+            headers = {
+                **CORS_HEADERS,
+                "Content-Range":  f"bytes {start}-{end}/{total}",
+                "Accept-Ranges":  "bytes",
+                "Content-Length": str(length),
+                "Content-Type":   mime_type,
+            }
+            return StreamingResponse(
+                _stream_telegram(channel_id, message_id, start, end, total),
+                status_code=206,
+                headers=headers,
+            )
         else:
-            start, end = 0, file_size - 1
-            status_code = 200
-            
-        headers = {
-            "Content-Type": "video/mp4",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(end - start + 1),
-        }
-        if status_code == 206:
-            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-            
-        return StreamingResponse(
-            stream_telegram_video(message, start, end),
-            status_code=status_code,
-            headers=headers,
-            media_type="video/mp4"
-        )
+            # ── Initial request — serve first 10MB as HTTP 206 ─
+            # This forces the browser to start playing immediately
+            # from the first 10MB buffer, then it automatically
+            # sends Range requests for the rest. Without this,
+            # the browser tries to download the full 600MB before
+            # playing, which times out on free hosting.
+            initial_end = min(total - 1, INITIAL_BUFFER - 1)
+            length      = initial_end - 0 + 1
+            headers = {
+                **CORS_HEADERS,
+                "Content-Range":  f"bytes 0-{initial_end}/{total}",
+                "Accept-Ranges":  "bytes",
+                "Content-Length": str(length),
+                "Content-Type":   mime_type,
+            }
+            return StreamingResponse(
+                _stream_telegram(channel_id, message_id, 0, initial_end, total),
+                status_code=206,
+                headers=headers,
+            )
+
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[NexusEdu] Stream error: {e}")
-        raise HTTPException(500, "Internal server error")
+        print(f"[NexusEdu] Stream error for {video_id}: {e}")
+        raise HTTPException(500, f"Stream error: {e}")
+
 
 @app.get("/api/test-stream")
 async def test_stream(request: Request):
+    """Test endpoint — streams the hardcoded test video."""
+    await resolve_channel(TEST_CHANNEL_ID)
+
     try:
-        TEST_CHANNEL_ID = "-1003569793885"
-        TEST_MESSAGE_ID = 3
-        
-        await resolve_channel(TEST_CHANNEL_ID)
-        
-        cache_key = f"{TEST_CHANNEL_ID}_{TEST_MESSAGE_ID}"
-        if cache_key in message_cache:
-            message = message_cache[cache_key]
-        else:
-            message = await tg.get_messages(int(TEST_CHANNEL_ID), TEST_MESSAGE_ID)
-            if not message or message.empty:
-                raise HTTPException(404, "Telegram message not found")
-            message_cache[cache_key] = message
-            
-        file_size = message.video.file_size if message.video else message.document.file_size
-        
+        total, mime_type = await get_file_info(TEST_CHANNEL_ID, TEST_MESSAGE_ID)
+        if not total:
+            raise HTTPException(500, "Test message not found or has no media. Check Telegram channel.")
+
         range_header = request.headers.get("range")
+
         if range_header:
-            start, end = parse_range(range_header, file_size)
-            status_code = 206
+            start, end = _parse_range(range_header, total)
+            length = end - start + 1
+            return StreamingResponse(
+                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID,
+                                 start, end, total),
+                status_code=206,
+                headers={
+                    **CORS_HEADERS,
+                    "Content-Range":  f"bytes {start}-{end}/{total}",
+                    "Accept-Ranges":  "bytes",
+                    "Content-Length": str(length),
+                    "Content-Type":   mime_type,
+                },
+            )
         else:
-            start, end = 0, file_size - 1
-            status_code = 200
-            
-        headers = {
-            "Content-Type": "video/mp4",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(end - start + 1),
-        }
-        if status_code == 206:
-            headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-            
-        return StreamingResponse(
-            stream_telegram_video(message, start, end),
-            status_code=status_code,
-            headers=headers,
-            media_type="video/mp4"
-        )
+            initial_end = min(total - 1, INITIAL_BUFFER - 1)
+            length      = initial_end - 0 + 1
+            return StreamingResponse(
+                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID,
+                                 0, initial_end, total),
+                status_code=206,
+                headers={
+                    **CORS_HEADERS,
+                    "Content-Range":  f"bytes 0-{initial_end}/{total}",
+                    "Accept-Ranges":  "bytes",
+                    "Content-Length": str(length),
+                    "Content-Type":   mime_type,
+                },
+            )
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"[NexusEdu] Test stream error: {e}")
-        raise HTTPException(500, "Internal server error")
+        raise HTTPException(500, f"Test stream error: {e}")
 
-@app.get("/api/debug")
-async def debug():
-    errors = []
-    test_channel_resolved = False
-    test_message_found = False
-    test_message_has_media = False
-    channel_title = None
-    media_type = None
-    file_size_mb = None
-    logged_in_as = None
-    
-    try:
-        me = await tg.get_me()
-        logged_in_as = me.first_name if me else None
-    except Exception as e:
-        errors.append(f"get_me error: {e}")
-        
-    try:
-        TEST_CHANNEL_ID = "-1003569793885"
-        chat = await tg.get_chat(int(TEST_CHANNEL_ID))
-        test_channel_resolved = True
-        channel_title = chat.title
-        
-        message = await tg.get_messages(int(TEST_CHANNEL_ID), 3)
-        if message and not message.empty:
-            test_message_found = True
-            if message.video:
-                test_message_has_media = True
-                media_type = "video"
-                file_size_mb = message.video.file_size / (1024 * 1024)
-            elif message.document:
-                test_message_has_media = True
-                media_type = "document"
-                file_size_mb = message.document.file_size / (1024 * 1024)
-    except Exception as e:
-        errors.append(f"test message error: {e}")
 
-    return {
-        "telegram_connected": tg.is_connected if tg else False,
-        "test_channel_resolved": test_channel_resolved,
-        "test_message_found": test_message_found,
-        "test_message_has_media": test_message_has_media,
-        "channel_title": channel_title,
-        "media_type": media_type,
-        "file_size_mb": file_size_mb,
-        "logged_in_as": logged_in_as,
-        "video_map_size": len(video_map),
-        "resolved_channels_count": len(resolved_channels),
-        "errors": errors
-    }
+# ─── RUN ──────────────────────────────────────────────────────
+if __name__ == "__main__":
+    print("[NexusEdu] Starting server on port 8080...")
+    uvicorn.run(app, host="0.0.0.0", port=8080)
