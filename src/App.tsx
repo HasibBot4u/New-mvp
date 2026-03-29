@@ -5,6 +5,8 @@ import { CatalogProvider } from './contexts/CatalogContext';
 import { ToastProvider } from './components/ui/Toast';
 import { BottomNav } from './components/layout/BottomNav';
 import { HomePage } from './pages/HomePage';
+import { SearchPage } from './pages/SearchPage';
+import { SubjectsPage } from './pages/SubjectsPage';
 import { CyclesPage } from './pages/CyclesPage';
 import { ChaptersPage } from './pages/ChaptersPage';
 import { VideoListPage } from './pages/VideoListPage';
@@ -39,6 +41,8 @@ const AppContent: React.FC = () => {
           <Route path="/login" element={<LoginPage />} />
           
           <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+          <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
+          <Route path="/subjects" element={<ProtectedRoute><SubjectsPage /></ProtectedRoute>} />
           <Route path="/subject/:subjectId" element={<ProtectedRoute><CyclesPage /></ProtectedRoute>} />
           <Route path="/cycle/:cycleId" element={<ProtectedRoute><ChaptersPage /></ProtectedRoute>} />
           <Route path="/chapter/:chapterId" element={<ProtectedRoute><VideoListPage /></ProtectedRoute>} />

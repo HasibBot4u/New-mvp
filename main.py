@@ -21,18 +21,18 @@ SUPABASE_KEY    = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 TEST_CHANNEL_ID = -1003569793885
 TEST_MESSAGE_ID = 3
-CHUNK_SIZE      = 1024 * 1024   # 1 MB per chunk
-CATALOG_TTL     = 300           # 5 minutes cache TTL
-INITIAL_BUFFER  = 512 * 1024  # 512KB — enough to start playing instantly
+CHUNK_SIZE      = 1024 * 1024        # 1 MB per chunk from Telegram
+CATALOG_TTL     = 300                # 5 min cache
+INITIAL_BUFFER  = 512 * 1024         # 512 KB first response — starts playing fast
 
 # ─── STATE ────────────────────────────────────────────────────
 tg: Optional[Client] = None
 catalog_cache   = {"data": None, "timestamp": 0}
-video_map       = {}   # uuid → {channel_id, message_id}
-message_cache   = {}   # "channelid_msgid" → message object
+video_map       = {}          # uuid → {channel_id, message_id}
+message_cache   = {}          # "channelid_msgid" → message object
 resolved_channels = set()
 
-# ─── CORS HEADERS (added to every streaming response manually) ─
+# ─── CORS (explicitly added to every StreamingResponse) ───────
 CORS_HEADERS = {
     "Access-Control-Allow-Origin":   "*",
     "Access-Control-Allow-Headers":  "*",
@@ -44,7 +44,6 @@ CORS_HEADERS = {
 
 # ─── TELEGRAM HELPERS ─────────────────────────────────────────
 async def resolve_channel(channel_id: int | str) -> bool:
-    """Introduce Pyrogram to a channel so get_messages() works."""
     cid = int(str(channel_id))
     if cid in resolved_channels:
         return True
@@ -59,21 +58,19 @@ async def resolve_channel(channel_id: int | str) -> bool:
 
 
 async def preload_channels():
-    """Load all channels from dialogs on startup."""
     try:
         async for dialog in tg.get_dialogs():
             try:
-                cid = dialog.chat.id
-                resolved_channels.add(cid)
+                resolved_channels.add(dialog.chat.id)
             except Exception:
                 pass
-        print(f"[NexusEdu] Resolved {len(resolved_channels)} channel(s) from dialogs.")
+        print(f"[NexusEdu] {len(resolved_channels)} channels loaded from dialogs.")
     except Exception as e:
         print(f"[NexusEdu] Dialog preload error: {e}")
 
 
 async def get_message(channel_id: int, message_id: int):
-    """Fetch and cache a Telegram message."""
+    """Fetch and cache a Telegram message object."""
     key = f"{channel_id}_{message_id}"
     if key not in message_cache:
         msg = await tg.get_messages(channel_id, message_id)
@@ -84,23 +81,51 @@ async def get_message(channel_id: int, message_id: int):
 async def get_file_info(channel_id: int, message_id: int) -> Tuple[int, str]:
     """
     Returns (file_size_bytes, mime_type).
-    Handles both video and document media types.
-    Videos uploaded as FILES in Telegram appear as 'document' type —
-    we detect this and force video/mp4 MIME type for browser playback.
+    Videos uploaded as FILES in Telegram appear as 'document' —
+    we detect this and force video/mp4 for browser playback.
     """
     msg = await get_message(channel_id, message_id)
-
     if msg.video:
         return msg.video.file_size, "video/mp4"
-
     if msg.document:
         mime = msg.document.mime_type or "video/mp4"
-        # Force video MIME even if Telegram classified as generic document
         if "video" not in mime.lower():
             mime = "video/mp4"
         return msg.document.file_size, mime
-
     return 0, "video/mp4"
+
+
+# ─── PRE-WARM (eliminates cold-start delay on first play) ─────
+async def _prewarm_all(video_items: list):
+    """
+    Background task: pre-fetches ALL Telegram messages after catalog loads.
+    After this completes, every video starts playing with zero Telegram delay.
+    0.3s gap between fetches prevents Telegram rate-limiting.
+    """
+    total = len(video_items)
+    if total == 0:
+        return
+    print(f"[NexusEdu] Pre-warming {total} message(s) in background...")
+    fetched = 0
+    for video_id, info in video_items:
+        cid_str    = info.get("channel_id", "")
+        message_id = info.get("message_id", 0)
+        if not cid_str or not message_id:
+            continue
+        key = f"{cid_str}_{message_id}"
+        if key in message_cache:
+            continue
+        try:
+            cid = int(cid_str)
+            await resolve_channel(cid)
+            msg = await tg.get_messages(cid, message_id)
+            if msg and not msg.empty:
+                message_cache[key] = msg
+                fetched += 1
+        except Exception:
+            pass
+        await asyncio.sleep(0.3)
+    print(f"[NexusEdu] Pre-warm done: {fetched}/{total} cached.")
 
 
 # ─── SUPABASE FETCH ───────────────────────────────────────────
@@ -109,20 +134,20 @@ async def fetch_supabase(path: str, client: httpx.AsyncClient) -> list:
         "apikey":        SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
     }
-    url = f"{SUPABASE_URL}/rest/v1/{path}"
-    r = await client.get(url, headers=headers, timeout=30)
+    r = await client.get(
+        f"{SUPABASE_URL}/rest/v1/{path}", headers=headers, timeout=30
+    )
     r.raise_for_status()
     return r.json()
 
 
 async def fetch_all_videos(client: httpx.AsyncClient) -> list:
-    """Paginated fetch — handles 1,458+ videos without hitting row limits."""
+    """Paginated — handles 1,458+ videos reliably."""
     headers = {
         "apikey":        SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
     }
-    all_videos = []
-    offset = 0
+    all_videos, offset = [], 0
     while True:
         url = (
             f"{SUPABASE_URL}/rest/v1/videos"
@@ -140,50 +165,13 @@ async def fetch_all_videos(client: httpx.AsyncClient) -> list:
         offset += 1000
     return all_videos
 
-async def _prewarm_all(video_items: list):
-    """
-    Background task: pre-fetches Telegram messages for all videos
-    so they are in message_cache before any user clicks play.
-    This eliminates the 2-3 second get_messages() delay on first play.
-    Fetches in small batches to avoid Telegram rate limiting.
-    """
-    print(f"[NexusEdu] Pre-warming {len(video_items)} video message(s)...")
-    fetched = 0
-    errors  = 0
-
-    for video_id, info in video_items:
-        channel_id_str = info.get("channel_id", "")
-        message_id     = info.get("message_id", 0)
-
-        if not channel_id_str or not message_id:
-            continue
-
-        key = f"{channel_id_str}_{message_id}"
-        if key in message_cache:
-            continue  # already cached, skip
-
-        try:
-            channel_id = int(channel_id_str)
-            await resolve_channel(channel_id)
-            msg = await tg.get_messages(channel_id, message_id)
-            if msg and not msg.empty:
-                message_cache[key] = msg
-                fetched += 1
-        except Exception as e:
-            errors += 1
-            print(f"[NexusEdu] Pre-warm failed for {key}: {e}")
-
-        # Small delay between fetches to avoid Telegram rate limiting
-        await asyncio.sleep(0.3)
-
-    print(f"[NexusEdu] Pre-warm complete: {fetched} cached, {errors} errors.")
 
 # ─── CATALOG BUILD ────────────────────────────────────────────
 async def refresh_catalog():
     global catalog_cache, video_map
 
     if not SUPABASE_URL or not SUPABASE_KEY:
-        print("[NexusEdu] Supabase not configured — skipping catalog load.")
+        print("[NexusEdu] Supabase not configured — skipping catalog.")
         return
 
     try:
@@ -196,7 +184,7 @@ async def refresh_catalog():
                 "chapters?is_active=eq.true&order=display_order", client)
             videos   = await fetch_all_videos(client)
 
-        # Build video_map for O(1) stream lookups by UUID
+        # Build video_map for O(1) stream lookups
         new_map = {}
         for v in videos:
             new_map[v["id"]] = {
@@ -205,16 +193,12 @@ async def refresh_catalog():
             }
         video_map = new_map
 
-        # Resolve all Telegram channels found in cycles table
-        unique_channels = {
-            c.get("telegram_channel_id")
-            for c in cycles
-            if c.get("telegram_channel_id")
-        }
-        for cid in unique_channels:
+        # Resolve all Telegram channels found in cycles
+        for cid in {c.get("telegram_channel_id") for c in cycles
+                    if c.get("telegram_channel_id")}:
             await resolve_channel(cid)
 
-        # Assemble nested hierarchy: subjects → cycles → chapters → videos
+        # Assemble nested hierarchy
         result = []
         for subj in subjects:
             s_cycles = sorted(
@@ -222,20 +206,18 @@ async def refresh_catalog():
                 key=lambda x: x.get("display_order", 0),
             )
             subj_data = {**subj, "cycles": []}
-
             for cyc in s_cycles:
                 c_chapters = sorted(
                     [ch for ch in chapters if ch["cycle_id"] == cyc["id"]],
                     key=lambda x: x.get("display_order", 0),
                 )
                 cyc_data = {**cyc, "chapters": []}
-
                 for chap in c_chapters:
                     c_videos = sorted(
                         [v for v in videos if v["chapter_id"] == chap["id"]],
                         key=lambda x: x.get("display_order", 0),
                     )
-                    chap_data = {
+                    cyc_data["chapters"].append({
                         **chap,
                         "videos": [
                             {
@@ -246,11 +228,8 @@ async def refresh_catalog():
                             }
                             for v in c_videos
                         ],
-                    }
-                    cyc_data["chapters"].append(chap_data)
-
+                    })
                 subj_data["cycles"].append(cyc_data)
-
             result.append(subj_data)
 
         catalog_cache = {
@@ -259,19 +238,17 @@ async def refresh_catalog():
         }
         print(f"[NexusEdu] Catalog loaded: {len(videos)} video(s).")
 
-        # Pre-warm message cache for all videos so first play is instant.
-        # Run as background task — does not block catalog from serving.
+        # Pre-warm all messages in background — eliminates first-play delay
         asyncio.create_task(_prewarm_all(list(video_map.items())))
 
     except Exception as e:
         print(f"[NexusEdu] Catalog load error: {e}")
 
 
-# ─── LIFESPAN (startup / shutdown) ────────────────────────────
+# ─── LIFESPAN ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global tg
-
     print("[NexusEdu] Starting Telegram client...")
     tg = Client(
         "nexusedu_session",
@@ -282,13 +259,10 @@ async def lifespan(app: FastAPI):
     )
     await tg.start()
     print("[NexusEdu] Telegram client started.")
-
     await preload_channels()
     await resolve_channel(TEST_CHANNEL_ID)
     await refresh_catalog()
-
-    yield  # ← server runs here
-
+    yield
     print("[NexusEdu] Stopping Telegram client...")
     await tg.stop()
 
@@ -303,8 +277,7 @@ app.add_middleware(
     allow_methods=["GET", "HEAD", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=[
-        "Content-Range", "Accept-Ranges",
-        "Content-Length", "Content-Type",
+        "Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"
     ],
 )
 
@@ -315,11 +288,8 @@ async def _stream_telegram(
     start: int, end: int, total: int
 ):
     """
-    Async generator that pulls 1MB chunks from Telegram and yields bytes.
-    Handles:
-      - Correct chunk offset for byte-accurate seeking
-      - Skipping leading bytes in first chunk for non-aligned Range starts
-      - Stopping exactly at the requested end byte
+    Async generator — pulls 1MB chunks from Telegram and yields bytes.
+    Byte-accurate: handles non-aligned range starts via skip_bytes.
     """
     chunk_offset = start // CHUNK_SIZE
     skip_bytes   = start % CHUNK_SIZE
@@ -331,27 +301,18 @@ async def _stream_telegram(
     target      = end - start + 1
     first_chunk = True
 
-    async for chunk in tg.stream_media(
-        msg, offset=chunk_offset, limit=needed
-    ):
+    async for chunk in tg.stream_media(msg, offset=chunk_offset, limit=needed):
         data = bytes(chunk)
-
-        # Skip leading bytes of first chunk for byte-aligned range start
         if first_chunk and skip_bytes:
             data        = data[skip_bytes:]
             first_chunk = False
-
-        # Trim last chunk to exact requested length
         remaining = target - bytes_sent
         if len(data) > remaining:
             data = data[:remaining]
-
         if not data:
             break
-
         bytes_sent += len(data)
         yield data
-
         if bytes_sent >= target:
             break
 
@@ -362,8 +323,7 @@ def _parse_range(range_header: str, total: int) -> Tuple[int, int]:
     parts = val.split("-")
     start = int(parts[0]) if parts[0] else 0
     end   = int(parts[1]) if len(parts) > 1 and parts[1] else total - 1
-    end   = min(end, total - 1)
-    return start, end
+    return start, min(end, total - 1)
 
 
 # ─── ENDPOINTS ────────────────────────────────────────────────
@@ -377,10 +337,11 @@ async def root():
 async def health():
     connected = tg is not None and tg.is_connected
     return {
-        "status":            "ok" if connected else "degraded",
-        "telegram":          "connected" if connected else "disconnected",
-        "videos_cached":     len(video_map),
-        "channels_resolved": len(resolved_channels),
+        "status":              "ok" if connected else "degraded",
+        "telegram":            "connected" if connected else "disconnected",
+        "videos_cached":       len(video_map),
+        "messages_cached":     len(message_cache),
+        "channels_resolved":   len(resolved_channels),
         "catalog_age_seconds": (
             round(time.time() - catalog_cache["timestamp"])
             if catalog_cache["timestamp"] else None
@@ -406,12 +367,10 @@ async def debug():
         "catalog_loaded":         catalog_cache["data"] is not None,
         "errors":                 [],
     }
-
     try:
         info["telegram_connected"] = tg.is_connected
     except Exception as e:
         info["errors"].append(f"telegram check: {e}")
-
     try:
         await resolve_channel(TEST_CHANNEL_ID)
         info["test_channel_resolved"] = True
@@ -425,23 +384,19 @@ async def debug():
                 info["file_size_mb"] = round(media.file_size / 1024 / 1024, 1)
     except Exception as e:
         info["errors"].append(f"message check: {e}")
-
     try:
         me = await tg.get_me()
         info["logged_in_as"] = f"{me.first_name} (ID: {me.id})"
     except Exception as e:
         info["errors"].append(f"get_me: {e}")
-
     return JSONResponse(info)
 
 
 @app.get("/api/catalog")
 async def catalog():
     now = time.time()
-    if (
-        catalog_cache["data"] is None
-        or now - catalog_cache["timestamp"] > CATALOG_TTL
-    ):
+    if (catalog_cache["data"] is None
+            or now - catalog_cache["timestamp"] > CATALOG_TTL):
         await refresh_catalog()
     return catalog_cache["data"] or {"subjects": [], "total_videos": 0}
 
@@ -454,44 +409,56 @@ async def force_refresh():
 
 @app.get("/api/warmup")
 async def warmup():
-    if not video_map:
-        return JSONResponse({"status": "ignored", "reason": "no videos mapped"})
-    asyncio.create_task(_prewarm_all(list(video_map.items())))
-    return JSONResponse({"status": "started", "videos": len(video_map)})
+    """
+    Called by frontend on app startup.
+    Triggers immediate pre-warming of all video messages in background.
+    """
+    if video_map:
+        asyncio.create_task(_prewarm_all(list(video_map.items())))
+        return {"status": "warming", "videos": len(video_map)}
+    await refresh_catalog()
+    return {"status": "catalog_refreshed_and_warming", "videos": len(video_map)}
 
 
 @app.get("/api/prefetch/{video_id}")
 async def prefetch_video(video_id: str):
+    """
+    Warms the message cache for a single video without streaming bytes.
+    Frontend calls this for every video when a chapter list loads,
+    so by the time user taps play the message is already cached.
+    """
     if video_id not in video_map:
-        return JSONResponse({"status": "ignored", "reason": "not found"})
-    
-    info = video_map[video_id]
-    channel_id_str = info.get("channel_id", "")
+        await refresh_catalog()
+    if video_id not in video_map:
+        return {"status": "not_found", "cached": False}
+
+    info       = video_map[video_id]
+    cid_str    = info.get("channel_id", "")
     message_id = info.get("message_id", 0)
-    
-    if not channel_id_str or not message_id:
-        return JSONResponse({"status": "ignored", "reason": "no telegram link"})
-        
-    key = f"{channel_id_str}_{message_id}"
+
+    if not cid_str or not message_id:
+        return {"status": "not_linked", "cached": False}
+
+    key = f"{cid_str}_{message_id}"
     if key in message_cache:
-        return JSONResponse({"status": "cached", "reason": "already cached"})
-        
+        return {"status": "already_cached", "cached": True}
+
     try:
-        channel_id = int(channel_id_str)
-        await resolve_channel(channel_id)
-        msg = await tg.get_messages(channel_id, message_id)
+        cid = int(cid_str)
+        await resolve_channel(cid)
+        msg = await tg.get_messages(cid, message_id)
         if msg and not msg.empty:
             message_cache[key] = msg
-            return JSONResponse({"status": "success", "reason": "fetched"})
+            media = msg.video or msg.document
+            size_mb = round(media.file_size / 1024 / 1024, 1) if media else 0
+            return {"status": "cached", "cached": True, "size_mb": size_mb}
+        return {"status": "message_empty", "cached": False}
     except Exception as e:
-        return JSONResponse({"status": "error", "reason": str(e)})
-        
-    return JSONResponse({"status": "error", "reason": "unknown"})
+        return {"status": "error", "cached": False, "error": str(e)}
 
 
 @app.get("/api/stream/{video_id}")
 async def stream_video(video_id: str, request: Request):
-    # ── Lookup video in map ────────────────────────────────────
     if video_id not in video_map:
         await refresh_catalog()
     if video_id not in video_map:
@@ -502,7 +469,7 @@ async def stream_video(video_id: str, request: Request):
     message_id = int(info["message_id"])
 
     if not channel_id or not message_id:
-        raise HTTPException(400, "Video not linked to Telegram — add message_id and channel_id in admin panel")
+        raise HTTPException(400, "Video not linked to Telegram — set message_id in admin panel")
 
     await resolve_channel(channel_id)
 
@@ -514,41 +481,37 @@ async def stream_video(video_id: str, request: Request):
         range_header = request.headers.get("range")
 
         if range_header:
-            # ── Seeking request (HTTP 206) ─────────────────────
+            # ── Seeking / subsequent request ──────────────────────
             start, end = _parse_range(range_header, total)
             length = end - start + 1
-            headers = {
-                **CORS_HEADERS,
-                "Content-Range":  f"bytes {start}-{end}/{total}",
-                "Accept-Ranges":  "bytes",
-                "Content-Length": str(length),
-                "Content-Type":   mime_type,
-            }
             return StreamingResponse(
                 _stream_telegram(channel_id, message_id, start, end, total),
                 status_code=206,
-                headers=headers,
+                headers={
+                    **CORS_HEADERS,
+                    "Content-Range":  f"bytes {start}-{end}/{total}",
+                    "Accept-Ranges":  "bytes",
+                    "Content-Length": str(length),
+                    "Content-Type":   mime_type,
+                },
             )
         else:
-            # ── Initial request — serve first 10MB as HTTP 206 ─
-            # This forces the browser to start playing immediately
-            # from the first 10MB buffer, then it automatically
-            # sends Range requests for the rest. Without this,
-            # the browser tries to download the full 600MB before
-            # playing, which times out on free hosting.
+            # ── First request — return ONLY the first 512KB as HTTP 206 ──
+            # This tells the browser the total file size (so seek bar works),
+            # but only delivers 512KB so playback starts in under 1 second.
+            # The browser then automatically sends Range requests for the rest.
             initial_end = min(total - 1, INITIAL_BUFFER - 1)
-            length      = initial_end - 0 + 1
-            headers = {
-                **CORS_HEADERS,
-                "Content-Range":  f"bytes 0-{initial_end}/{total}",
-                "Accept-Ranges":  "bytes",
-                "Content-Length": str(length),
-                "Content-Type":   mime_type,
-            }
+            length      = initial_end + 1
             return StreamingResponse(
                 _stream_telegram(channel_id, message_id, 0, initial_end, total),
                 status_code=206,
-                headers=headers,
+                headers={
+                    **CORS_HEADERS,
+                    "Content-Range":  f"bytes 0-{initial_end}/{total}",
+                    "Accept-Ranges":  "bytes",
+                    "Content-Length": str(length),
+                    "Content-Type":   mime_type,
+                },
             )
 
     except HTTPException:
@@ -560,22 +523,19 @@ async def stream_video(video_id: str, request: Request):
 
 @app.get("/api/test-stream")
 async def test_stream(request: Request):
-    """Test endpoint — streams the hardcoded test video."""
+    """Streams the hardcoded test video — used for diagnostics."""
     await resolve_channel(TEST_CHANNEL_ID)
-
     try:
         total, mime_type = await get_file_info(TEST_CHANNEL_ID, TEST_MESSAGE_ID)
         if not total:
-            raise HTTPException(500, "Test message not found or has no media. Check Telegram channel.")
+            raise HTTPException(500, "Test message has no media. Check channel.")
 
         range_header = request.headers.get("range")
-
         if range_header:
             start, end = _parse_range(range_header, total)
             length = end - start + 1
             return StreamingResponse(
-                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID,
-                                 start, end, total),
+                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID, start, end, total),
                 status_code=206,
                 headers={
                     **CORS_HEADERS,
@@ -587,20 +547,17 @@ async def test_stream(request: Request):
             )
         else:
             initial_end = min(total - 1, INITIAL_BUFFER - 1)
-            length      = initial_end - 0 + 1
             return StreamingResponse(
-                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID,
-                                 0, initial_end, total),
+                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID, 0, initial_end, total),
                 status_code=206,
                 headers={
                     **CORS_HEADERS,
                     "Content-Range":  f"bytes 0-{initial_end}/{total}",
                     "Accept-Ranges":  "bytes",
-                    "Content-Length": str(length),
+                    "Content-Length": str(str(initial_end + 1)),
                     "Content-Type":   mime_type,
                 },
             )
-
     except HTTPException:
         raise
     except Exception as e:

@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { useCatalog } from '../../contexts/CatalogContext';
 import { supabase } from '../../lib/supabase';
-import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { Plus, Edit2, Trash2, Search } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
 
 export const AdminContent: React.FC = () => {
-  const { catalog, isLoading } = useCatalog();
+  const { catalog, isLoading, refreshCatalog } = useCatalog();
   const [activeTab, setActiveTab] = useState<'subjects' | 'cycles' | 'chapters' | 'videos'>('subjects');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -92,8 +91,7 @@ export const AdminContent: React.FC = () => {
       }
       
       setIsModalOpen(false);
-      await api.refreshCatalog();
-      window.location.reload();
+      await refreshCatalog();
     } catch (error) {
       console.error(`Error saving ${activeTab}:`, error);
       alert(`Failed to save ${activeTab.slice(0, -1)}`);
@@ -110,8 +108,7 @@ export const AdminContent: React.FC = () => {
       if (error) throw error;
       
       // Refresh catalog after deletion
-      await api.refreshCatalog();
-      window.location.reload();
+      await refreshCatalog();
     } catch (error) {
       console.error(`Error deleting from ${table}:`, error);
       alert(`Failed to delete ${table.slice(0, -1)}`);

@@ -68,6 +68,24 @@ export const api = {
     }
   },
 
+  async warmup(): Promise<void> {
+    try {
+      const baseUrl = await getWorkingBackend();
+      await fetch(`${baseUrl}/api/warmup`);
+    } catch (e) {
+      console.warn('Warmup failed', e);
+    }
+  },
+
+  async prefetchVideo(videoId: string): Promise<void> {
+    try {
+      const baseUrl = await getWorkingBackend();
+      await fetch(`${baseUrl}/api/prefetch/${videoId}`);
+    } catch (e) {
+      console.warn(`Prefetch failed for ${videoId}`, e);
+    }
+  },
+
   async refreshCatalog(): Promise<{ status: string; message: string }> {
     const baseUrl = await getWorkingBackend();
     const response = await fetch(`${baseUrl}/api/refresh`);

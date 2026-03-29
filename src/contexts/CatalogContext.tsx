@@ -24,8 +24,7 @@ export const CatalogProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setCatalog(data);
       
       // After catalog fetch succeeds, trigger backend warmup
-      fetch('https://nexusedu-backend-0bjq.onrender.com/api/warmup')
-        .catch(() => {}); // silent, just warms cache
+      api.warmup();
     } catch (err: any) {
       setError(err.message || 'Failed to load catalog');
     } finally {

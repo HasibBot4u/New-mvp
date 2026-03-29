@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, Rewind, FastForward, PictureInPicture } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useVideoProgress } from '../../hooks/useVideoProgress';
+import { useAuth } from '../../contexts/AuthContext';
+import { saveProgress } from '../../lib/supabase';
+import { api } from '../../lib/api';
 
 interface VideoPlayerProps {
   videoId: string;
@@ -14,6 +17,7 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   const progressRef = useRef<HTMLDivElement>(null);
   const { showToast } = useToast();
   const { getProgress, setProgress, isCompleted, setCompleted } = useVideoProgress();
+  const { user } = useAuth();
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -28,8 +32,9 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   const [buffered, setBuffered] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [hasStarted, setHasStarted] = useState(false);
+  const [chapters, setChapters] = useState<{ title: string; time: number; percent: number }[]>([]);
 
-  const streamUrl = `https://nexusedu-backend-0bjq.onrender.com/api/stream/${videoId}`;
+  const streamUrl = api.getVideoStreamUrl(videoId);
 
   const startVideo = async () => {
     if (!videoRef.current) return;
@@ -258,6 +263,9 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
     };
   }, [isPlaying]);
 
+  const lastLocalSaveTimeRef = useRef<number>(0);
+  const lastSupabaseSaveTimeRef = useRef<number>(0);
+
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const time = videoRef.current.currentTime;
@@ -268,9 +276,17 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
       setBuffered(videoRef.current.buffered.end(videoRef.current.buffered.length - 1));
     }
 
-    // Save progress every 5 seconds
-    if (Math.floor(time) % 5 === 0 && time > 0) {
+    // Save progress every 5 seconds locally
+    if (Math.abs(time - lastLocalSaveTimeRef.current) >= 5) {
+      lastLocalSaveTimeRef.current = time;
       setProgress(videoId, time);
+    }
+    
+    // Save progress to Supabase every 30 seconds
+    if (user && duration > 0 && Math.abs(time - lastSupabaseSaveTimeRef.current) >= 30) {
+      lastSupabaseSaveTimeRef.current = time;
+      const percent = Math.floor((time / duration) * 100);
+      saveProgress(user.id, videoId, percent).catch(console.error);
     }
 
     // Auto-mark complete at 85%
@@ -279,6 +295,38 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
       if (onComplete) onComplete();
     }
   };
+
+  useEffect(() => {
+    // Generate dummy chapters for videos longer than 10 minutes (600s)
+    if (duration > 600) {
+      const interval = Math.max(300, Math.floor(duration / 5)); // At least 5 mins, max 5 chapters
+      const newChapters = [];
+      let currentTime = 0;
+      let part = 1;
+      
+      newChapters.push({
+        title: 'Introduction',
+        time: 0,
+        percent: 0
+      });
+
+      currentTime += interval;
+      
+      while (currentTime < duration - 60) { // Don't add a chapter too close to the end
+        newChapters.push({
+          title: `Topic ${part}`,
+          time: currentTime,
+          percent: (currentTime / duration) * 100
+        });
+        currentTime += interval;
+        part++;
+      }
+      
+      setChapters(newChapters);
+    } else {
+      setChapters([]);
+    }
+  }, [duration]);
 
   const handleDurationChange = () => {
     if (!videoRef.current) return;
@@ -311,7 +359,10 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
         onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
         onPause={() => setIsPlaying(false)}
         onEnded={() => { setIsPlaying(false); setShowControls(true); }}
-        onError={(e) => console.error("Video Error:", e)}
+        onError={(e) => {
+          const video = e.target as HTMLVideoElement;
+          console.error("Video Error:", video.error);
+        }}
         onContextMenu={(e) => e.preventDefault()}
         onClick={togglePlay}
       />
@@ -367,9 +418,24 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
             className="absolute top-0 left-0 h-full bg-primary"
             style={{ width: `${(currentTime / duration) * 100}%` }}
           />
+
+          {/* Chapter Markers */}
+          {chapters.map((chapter, index) => (
+            <div
+              key={index}
+              className="absolute top-0 bottom-0 w-0.5 bg-black/50 group-hover/progress:bg-black/80 transition-colors z-10 group/marker"
+              style={{ left: `${chapter.percent}%` }}
+            >
+              {/* Tooltip for chapter */}
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover/marker:opacity-100 transition-opacity bg-black/90 text-white text-xs px-2 py-1 rounded whitespace-nowrap pointer-events-none z-30">
+                {chapter.title} • {formatTime(chapter.time)}
+              </div>
+            </div>
+          ))}
+
           {/* Hover indicator (simplified) */}
           <div 
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary rounded-full opacity-0 group-hover/progress:opacity-100 transition-opacity"
+            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary rounded-full opacity-0 group-hover/progress:opacity-100 transition-opacity z-20"
             style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
           />
         </div>

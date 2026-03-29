@@ -1,12 +1,19 @@
-import { Home, User } from 'lucide-react';
+import { Home, User, Search, BookOpen } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 export function BottomNav() {
   const location = useLocation();
   const path = location.pathname;
 
+  // Hide BottomNav on login, admin, and watch pages
+  if (path === '/login' || path.startsWith('/admin') || path.startsWith('/watch')) {
+    return null;
+  }
+
   const navItems = [
     { icon: Home, label: 'Home', to: '/' },
+    { icon: Search, label: 'Search', to: '/search' },
+    { icon: BookOpen, label: 'Subjects', to: '/subjects' },
     { icon: User, label: 'Profile', to: '/profile' },
   ];
 

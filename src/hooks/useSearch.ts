@@ -25,10 +25,10 @@ export function useSearch(query: string) {
     const matches: SearchResult[] = [];
 
     catalog.subjects.forEach((subject: any) => {
-      if (subject.title.toLowerCase().includes(lowerQuery)) {
+      if (subject.name.toLowerCase().includes(lowerQuery)) {
         matches.push({
           id: subject.id,
-          title: subject.title,
+          title: subject.name,
           type: 'subject',
           subtitle: 'Subject',
           url: `/subject/${subject.id}`
@@ -36,13 +36,23 @@ export function useSearch(query: string) {
       }
 
       subject.cycles.forEach((cycle: any) => {
+        if (cycle.name.toLowerCase().includes(lowerQuery)) {
+          matches.push({
+            id: cycle.id,
+            title: cycle.name,
+            type: 'subject', // or 'cycle' if we had it, but 'subject' is fine or maybe we can just route to cycle
+            subtitle: `${subject.name}`,
+            url: `/cycle/${cycle.id}`
+          });
+        }
+
         cycle.chapters.forEach((chapter: any) => {
-          if (chapter.title.toLowerCase().includes(lowerQuery)) {
+          if (chapter.name.toLowerCase().includes(lowerQuery)) {
             matches.push({
               id: chapter.id,
-              title: chapter.title,
+              title: chapter.name,
               type: 'chapter',
-              subtitle: `${subject.title} > ${cycle.title}`,
+              subtitle: `${subject.name} > ${cycle.name}`,
               url: `/chapter/${chapter.id}`
             });
           }
@@ -53,7 +63,7 @@ export function useSearch(query: string) {
                 id: video.id,
                 title: video.title,
                 type: 'video',
-                subtitle: `${subject.title} > ${cycle.title} > ${chapter.title}`,
+                subtitle: `${subject.name} > ${cycle.name} > ${chapter.name}`,
                 url: `/watch/${video.id}`
               });
             }

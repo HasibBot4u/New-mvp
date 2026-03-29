@@ -5,6 +5,7 @@ import { useCatalog } from '../contexts/CatalogContext';
 import { useVideoProgress } from '../hooks/useVideoProgress';
 import { Breadcrumb } from '../components/ui/Breadcrumb';
 import { Skeleton } from '../components/ui/Skeleton';
+import { api } from '../lib/api';
 
 export function VideoListPage() {
   const { chapterId } = useParams<{ chapterId: string }>();
@@ -73,10 +74,7 @@ export function VideoListPage() {
     // Stagger by 200ms each to avoid hammering the backend
     videos.forEach((video: any, index: number) => {
       setTimeout(() => {
-        fetch(
-          `https://nexusedu-backend-0bjq.onrender.com/api/prefetch/${video.id}`,
-          { method: 'GET' }
-        ).catch(() => {}); // silently ignore errors
+        api.prefetchVideo(video.id);
       }, index * 200);
     });
   }, [videos]);

@@ -117,16 +117,15 @@ ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE watch_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_logs ENABLE ROW LEVEL SECURITY;
 
--- Helper function to check if user is admin (bypasses RLS to prevent infinite recursion)
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
 DECLARE
   user_role TEXT;
 BEGIN
-  SELECT role INTO user_role FROM public.profiles WHERE id = auth.uid();
+  SELECT role INTO user_role FROM public.profiles WHERE id = auth.uid() LIMIT 1;
   RETURN user_role = 'admin';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Subjects policies
 CREATE POLICY "public_read_active" ON subjects FOR SELECT USING (is_active = true);
@@ -145,10 +144,13 @@ CREATE POLICY "public_read_active" ON videos FOR SELECT USING (is_active = true)
 CREATE POLICY "admin_all" ON videos FOR ALL USING (public.is_admin());
 
 -- Profiles policies
-CREATE POLICY "users_read_own" ON profiles FOR SELECT USING (id = auth.uid());
+CREATE POLICY "auth_read_all" ON profiles FOR SELECT USING (
+  auth.role() = 'authenticated' OR public.is_admin()
+);
 CREATE POLICY "users_update_own" ON profiles FOR UPDATE USING (id = auth.uid());
-CREATE POLICY "auth_read_all" ON profiles FOR SELECT USING (auth.role() = 'authenticated');
+-- We can use is_admin() for UPDATE/DELETE because those don't trigger the SELECT policy loop
 CREATE POLICY "admin_update_all" ON profiles FOR UPDATE USING (public.is_admin());
+CREATE POLICY "admin_delete_all" ON profiles FOR DELETE USING (public.is_admin());
 
 -- Watch history policies
 CREATE POLICY "users_manage_own" ON watch_history FOR ALL USING (user_id = auth.uid());
