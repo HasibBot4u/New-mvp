@@ -32,6 +32,23 @@ export function VideoListPage() {
     return null;
   }, [catalog, chapterId]);
 
+  const videos = useMemo(() => {
+    if (!data) return [];
+    return data.chapter.videos || [];
+  }, [data]);
+
+  useEffect(() => {
+    if (!videos || videos.length === 0) return;
+    
+    // Fire prefetch for all videos in this chapter
+    // Stagger by 200ms each to avoid hammering the backend
+    videos.forEach((video: any, index: number) => {
+      setTimeout(() => {
+        api.prefetchVideo(video.id);
+      }, index * 200);
+    });
+  }, [videos]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 pb-20">
@@ -65,19 +82,6 @@ export function VideoListPage() {
   }
 
   const { subject, cycle, chapter } = data;
-  const videos = chapter.videos || [];
-  
-  useEffect(() => {
-    if (!videos || videos.length === 0) return;
-    
-    // Fire prefetch for all videos in this chapter
-    // Stagger by 200ms each to avoid hammering the backend
-    videos.forEach((video: any, index: number) => {
-      setTimeout(() => {
-        api.prefetchVideo(video.id);
-      }, index * 200);
-    });
-  }, [videos]);
 
   const completedCount = videos.filter((v: any) => isCompleted(v.id)).length;
   const progressPercent = videos.length > 0 ? Math.round((completedCount / videos.length) * 100) : 0;

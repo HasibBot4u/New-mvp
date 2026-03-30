@@ -36,8 +36,8 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
 
   const streamUrl = api.getVideoStreamUrl(videoId);
 
-  const startVideo = async () => {
-    if (!videoRef.current) return;
+  const startVideo = useCallback(async () => {
+    if (hasStarted || !videoRef.current) return;
     const video = videoRef.current;
     
     setHasStarted(true);
@@ -53,7 +53,7 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
     video.addEventListener('loadedmetadata', () => {
       video.play().catch(() => {});
     }, { once: true });
-  };
+  }, [streamUrl, hasStarted]);
 
   // Load saved settings
   useEffect(() => {
@@ -92,15 +92,33 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   };
 
   const togglePlay = useCallback(() => {
+    if (!hasStarted) {
+      startVideo();
+      return;
+    }
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
       } else {
-        videoRef.current.play();
+        const playPromise = videoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((e) => {
+            if (e.name === 'NotSupportedError') {
+              // Video failed to load or source is unsupported. Try reloading.
+              if (videoRef.current) {
+                videoRef.current.src = streamUrl;
+                videoRef.current.load();
+                videoRef.current.play().catch(() => {});
+              }
+            } else if (e.name !== 'AbortError') {
+              console.error('Play failed:', e);
+            }
+          });
+        }
       }
       setIsPlaying(!isPlaying);
     }
-  }, [isPlaying]);
+  }, [isPlaying, hasStarted, startVideo, streamUrl]);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVolume = parseFloat(e.target.value);
@@ -147,13 +165,15 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   }, []);
 
   const handleSeek = useCallback((amount: number) => {
+    if (!hasStarted) return;
     if (videoRef.current) {
       videoRef.current.currentTime += amount;
       showVideoToast(amount > 0 ? '+10s' : '-10s');
     }
-  }, []);
+  }, [hasStarted]);
 
   const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!hasStarted) return;
     if (progressRef.current && videoRef.current) {
       const rect = progressRef.current.getBoundingClientRect();
       const pos = (e.clientX - rect.left) / rect.width;
@@ -170,6 +190,7 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   };
 
   const togglePiP = async () => {
+    if (!hasStarted) return;
     if (videoRef.current && document.pictureInPictureEnabled) {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
