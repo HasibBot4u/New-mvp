@@ -4,7 +4,6 @@ import { useToast } from '../ui/Toast';
 import { useVideoProgress } from '../../hooks/useVideoProgress';
 import { useAuth } from '../../contexts/AuthContext';
 import { saveProgress } from '../../lib/supabase';
-import { api } from '../../lib/api';
 
 interface VideoPlayerProps {
   videoId: string;
@@ -26,34 +25,94 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   const [duration, setDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [isBuffering, setIsBuffering] = useState(true);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [buffered, setBuffered] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [hasStarted, setHasStarted] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isStarting, setIsStarting] = useState(false);
   const [chapters, setChapters] = useState<{ title: string; time: number; percent: number }[]>([]);
 
-  const streamUrl = api.getVideoStreamUrl(videoId);
-
-  const startVideo = useCallback(async () => {
-    if (hasStarted || !videoRef.current) return;
-    const video = videoRef.current;
+  const startVideo = async () => {
+    if (!videoRef.current) return;
     
     setHasStarted(true);
+    setIsStarting(true);
+    setHasError(false);
+    setErrorMessage('');
+    
+    // Check if backend is alive before setting src
+    // This prevents the "no supported sources" crash on cold start
+    const BACKENDS = [
+      'https://nexusedu-backend-0bjq.onrender.com',
+      'https://edbe7e18-233b-4ff5-bed9-83c4e0edd51e-00-25a1ryv2rxe0o.sisko.replit.dev'
+    ];
+    
+    let workingBackend = '';
+    for (const backend of BACKENDS) {
+      try {
+        const res = await fetch(`${backend}/`, { 
+          method: 'GET',
+          signal: AbortSignal.timeout(8000)
+        });
+        if (res.ok) {
+          workingBackend = backend;
+          localStorage.setItem('working_backend', backend);
+          break;
+        }
+      } catch (e) {
+        continue;
+      }
+    }
+    
+    if (!workingBackend) {
+      setIsStarting(false);
+      setHasError(true);
+      setErrorMessage('Cannot connect to video server. Please check your internet and try again.');
+      return;
+    }
+    
+    const url = `${workingBackend}/api/stream/${videoId}`;
+    const video = videoRef.current;
+    
+    setIsStarting(false);
     setIsBuffering(true);
     
-    // Step 1: Set src with cache-busting to force fresh request
-    video.src = streamUrl;
-    
-    // Step 2: Load metadata first (fast — just gets file size/duration)
+    video.src = url;
     video.load();
     
-    // Step 3: Attempt to play as soon as any data arrives
-    video.addEventListener('loadedmetadata', () => {
-      video.play().catch(() => {});
-    }, { once: true });
-  }, [streamUrl, hasStarted]);
+    // Use canplay instead of loadedmetadata for more reliability
+    const handleCanPlay = () => {
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          if (err.name === 'AbortError') return;
+          console.error('Play error:', err);
+          setIsBuffering(false);
+          setHasError(true);
+          setErrorMessage('Video failed to play. Try tapping play again.');
+        });
+      }
+    };
+    
+    video.addEventListener('canplay', handleCanPlay, { once: true });
+    
+    // Timeout: if nothing happens in 15 seconds, show error
+    const timeout = setTimeout(() => {
+      video.removeEventListener('canplay', handleCanPlay);
+      if (!isPlaying) {
+        setIsBuffering(false);
+        setHasError(true);
+        setErrorMessage('Server is taking too long to respond. Tap retry to try again.');
+      }
+    }, 15000);
+    
+    // Clear timeout when video starts playing
+    video.addEventListener('playing', () => clearTimeout(timeout), { once: true });
+  };
 
   // Load saved settings
   useEffect(() => {
@@ -96,29 +155,18 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
       startVideo();
       return;
     }
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
-        const playPromise = videoRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((e) => {
-            if (e.name === 'NotSupportedError') {
-              // Video failed to load or source is unsupported. Try reloading.
-              if (videoRef.current) {
-                videoRef.current.src = streamUrl;
-                videoRef.current.load();
-                videoRef.current.play().catch(() => {});
-              }
-            } else if (e.name !== 'AbortError') {
-              console.error('Play failed:', e);
-            }
-          });
-        }
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) {
+      const playPromise = videoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          if (err.name !== 'AbortError') console.error(err);
+        });
       }
-      setIsPlaying(!isPlaying);
+    } else {
+      videoRef.current.pause();
     }
-  }, [isPlaying, hasStarted, startVideo, streamUrl]);
+  }, [hasStarted, videoId]);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVolume = parseFloat(e.target.value);
@@ -380,24 +428,58 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
         onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
         onPause={() => setIsPlaying(false)}
         onEnded={() => { setIsPlaying(false); setShowControls(true); }}
-        onError={(e) => {
-          const video = e.target as HTMLVideoElement;
-          console.error("Video Error:", video.error);
+        onError={() => {
+          setIsBuffering(false);
+          if (hasStarted) {
+            setHasError(true);
+            setHasStarted(false);
+            setErrorMessage('Video source error. The server may be starting up — tap Retry in 30 seconds.');
+          }
         }}
         onContextMenu={(e) => e.preventDefault()}
-        onClick={togglePlay}
+        onClick={() => { if (hasStarted) togglePlay(); }}
       />
 
       {/* Initial Play Overlay */}
-      {!hasStarted && (
+      {!hasStarted && !hasError && (
         <div 
           className="absolute inset-0 bg-black flex flex-col items-center justify-center cursor-pointer z-20"
           onClick={startVideo}
         >
-          <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4 hover:bg-white/20 hover:scale-110 transition-all duration-200">
-            <Play className="w-8 h-8 text-white ml-1" fill="currentColor" />
-          </div>
-          <p className="text-white/60 text-sm font-medium">Tap to play</p>
+          {isStarting ? (
+            <div className="flex flex-col items-center space-y-3">
+              <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+              <p className="text-white/70 text-sm font-medium">Connecting to server...</p>
+            </div>
+          ) : (
+            <>
+              <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4 hover:bg-white/20 hover:scale-110 transition-all duration-200">
+                <Play className="w-8 h-8 text-white ml-1" fill="currentColor" />
+              </div>
+              <p className="text-white/60 text-sm font-medium">Tap to play</p>
+            </>
+          )}
+        </div>
+      )}
+
+      {hasError && (
+        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-20 px-6">
+          <div className="text-red-400 text-4xl mb-4">⚠️</div>
+          <p className="text-white text-sm font-medium text-center mb-2">
+            {errorMessage || 'Video failed to load'}
+          </p>
+          <p className="text-white/50 text-xs text-center mb-6">
+            The server may be starting up. This can take 30–60 seconds.
+          </p>
+          <button
+            onClick={() => {
+              setHasError(false);
+              setHasStarted(false);
+            }}
+            className="px-6 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 transition-colors"
+          >
+            Try Again
+          </button>
         </div>
       )}
 
