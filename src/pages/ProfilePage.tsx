@@ -16,8 +16,10 @@ export function ProfilePage() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    refreshProfile();
-    setStats(getStats());
+    refreshProfile().then(() => {
+      setStats(getStats());
+      setVisible(true);
+    });
     setVisible(true);
   }, []);
 
@@ -92,11 +94,13 @@ export function ProfilePage() {
           </div>
           
           {profile?.role === 'admin' && (
-            <button 
+            <button
               onClick={() => navigate('/admin')}
-              className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors border-b border-gray-100"
+              className="w-full flex items-center justify-between p-4 
+                         hover:bg-amber-50 transition-colors border-b 
+                         border-gray-100"
             >
-              <div className="flex items-center space-x-3 text-gray-700">
+              <div className="flex items-center space-x-3 text-amber-700">
                 <Shield className="w-5 h-5 text-amber-500" />
                 <span className="font-medium">Admin Dashboard</span>
               </div>
@@ -105,7 +109,7 @@ export function ProfilePage() {
           )}
 
           <button 
-            onClick={() => showToast('App Settings coming soon!')}
+            onClick={() => showToast('App settings coming soon!')}
             className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors border-b border-gray-100"
           >
             <div className="flex items-center space-x-3 text-gray-700">

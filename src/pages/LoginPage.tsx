@@ -15,15 +15,15 @@ export const LoginPage: React.FC = () => {
   const location = useLocation();
   const { user, signOut } = useAuth();
   
-  const isBlocked = location.state?.blocked === true;
+  const wasBlocked = location.state?.blocked === true;
 
   useEffect(() => {
-    if (isBlocked && user) {
+    if (wasBlocked && user) {
       signOut();
     }
-  }, [isBlocked, user, signOut]);
+  }, [wasBlocked, user, signOut]);
 
-  if (user && !isBlocked) {
+  if (user && !wasBlocked) {
     return <Navigate to="/" replace />;
   }
 
@@ -123,9 +123,11 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12 sm:px-6 lg:px-8 flex-col">
-      {isBlocked && (
-        <div className="w-full max-w-md mb-4 rounded-md bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-          <strong>Account Blocked.</strong> Your account has been blocked by an administrator. Contact support if you believe this is a mistake.
+      {wasBlocked && (
+        <div className="rounded-lg bg-red-50 border border-red-200 
+                        p-4 text-sm text-red-700">
+          <strong>Account blocked.</strong> Your account has been blocked 
+          by an administrator. Contact support if this is a mistake.
         </div>
       )}
       <div className="w-full max-w-md space-y-8 rounded-2xl border border-border bg-surface p-8 shadow-sm">

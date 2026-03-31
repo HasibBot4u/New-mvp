@@ -68,18 +68,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshProfile = async () => {
-    if (!user) return;
+    const currentUser = user;
+    if (!currentUser) return;
     try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', user.id)
+        .eq('id', currentUser.id)
         .single();
-      if (!error && data) {
-        setProfile(data as Profile);
+      if (error) {
+        console.error('Error fetching profile:', error);
+        return;
       }
+      if (data) setProfile(data as Profile);
     } catch (e) {
-      console.error('refreshProfile error:', e);
+      console.error('refreshProfile exception:', e);
     }
   };
 
