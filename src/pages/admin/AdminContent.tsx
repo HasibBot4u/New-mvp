@@ -173,44 +173,6 @@ export const AdminContent: React.FC = () => {
     }
   };
 
-  const handleBulkImport = async () => {
-    try {
-      setIsImporting(true);
-      setImportProgress('Parsing JSON...');
-      
-      let items;
-      try {
-        items = JSON.parse(importJson);
-      } catch (e) {
-        throw new Error('Invalid JSON format');
-      }
-      
-      if (!Array.isArray(items)) {
-        throw new Error('JSON must be an array of objects');
-      }
-      
-      setImportProgress(`Importing ${items.length} items...`);
-      
-      // Basic validation and batch insert
-      const { error } = await supabase.from(activeTab).insert(items);
-      
-      if (error) throw error;
-      
-      setImportProgress('Import complete! Refreshing catalog...');
-      await refreshCatalog();
-      
-      showToast(`Successfully imported ${items.length} items`);
-      setIsImportModalOpen(false);
-      setImportJson('');
-    } catch (error: any) {
-      console.error('Import error:', error);
-      showToast(`Import failed: ${error.message || 'Unknown error'}`);
-      setImportProgress(`Error: ${error.message}`);
-    } finally {
-      setIsImporting(false);
-    }
-  };
-
   const renderContent = () => {
     switch (activeTab) {
       case 'subjects':
@@ -373,10 +335,6 @@ export const AdminContent: React.FC = () => {
           <p className="text-text-secondary text-sm">Manage subjects, cycles, chapters, and videos</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="flex items-center gap-2" onClick={() => setIsImportModalOpen(true)}>
-            <Upload size={16} />
-            Bulk Import
-          </Button>
           <Button className="flex items-center gap-2" onClick={handleAdd}>
             <Plus size={16} />
             Add New {activeTab.slice(0, -1)}
@@ -661,51 +619,175 @@ export const AdminContent: React.FC = () => {
         </form>
       </Modal>
 
-      {/* Bulk Import Modal */}
-      <Modal
-        isOpen={isImportModalOpen}
-        onClose={() => !isImporting && setIsImportModalOpen(false)}
-        title={`Bulk Import ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}`}
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-text-secondary">
-            Paste a JSON array of objects to import multiple records at once. 
-            Ensure the fields match the database schema for the <strong className="text-text-primary">{activeTab}</strong> table.
-          </p>
+      {/* Bulk Import Section (Videos Tab Only) */}
+      {activeTab === 'videos' && (
+        <div className="mt-8 rounded-xl border border-border bg-background shadow-sm overflow-hidden">
+          <div 
+            className="border-b border-border bg-surface px-6 py-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition-colors"
+            onClick={() => setIsImportModalOpen(!isImportModalOpen)}
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                <Upload size={20} />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-text-primary">Bulk Import Videos</h2>
+                <p className="text-sm text-text-secondary">Import multiple videos into a specific chapter via JSON</p>
+              </div>
+            </div>
+            <div className={`transform transition-transform ${isImportModalOpen ? 'rotate-180' : ''}`}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-secondary"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </div>
+          </div>
           
-          <textarea
-            value={importJson}
-            onChange={(e) => setImportJson(e.target.value)}
-            placeholder="[\n  {\n    &quot;name&quot;: &quot;Example&quot;,\n    &quot;display_order&quot;: 1\n  }\n]"
-            className="w-full h-64 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            disabled={isImporting}
-          />
-          
-          {importProgress && (
-            <div className={`p-3 rounded-lg text-sm ${importProgress.includes('Error') ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
-              {importProgress}
+          {isImportModalOpen && (
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="md:col-span-1 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-1">Target Chapter</label>
+                    <select
+                      value={formData.bulk_chapter_id || ''}
+                      onChange={(e) => setFormData({ ...formData, bulk_chapter_id: e.target.value })}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">Select a chapter...</option>
+                      {allChapters.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-800">
+                    <h4 className="font-bold mb-2 flex items-center gap-2">
+                      <CheckCircle size={16} /> Expected JSON Format
+                    </h4>
+                    <pre className="text-xs bg-white p-2 rounded border border-blue-100 overflow-x-auto">
+{`[
+  {
+    "title": "Video Title",
+    "telegram_file_id": "...",
+    "telegram_message_id": 123,
+    "display_order": 1
+  }
+]`}
+                    </pre>
+                  </div>
+                </div>
+                
+                <div className="md:col-span-2 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-1">JSON Data</label>
+                    <textarea
+                      value={importJson}
+                      onChange={(e) => {
+                        setImportJson(e.target.value);
+                        setImportProgress('');
+                      }}
+                      placeholder="Paste JSON array here..."
+                      className="w-full h-48 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      disabled={isImporting}
+                    />
+                  </div>
+                  
+                  {importProgress && (
+                    <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
+                      importProgress.includes('Error') || importProgress.includes('failed') 
+                        ? 'bg-red-50 text-red-700 border border-red-100' 
+                        : 'bg-green-50 text-green-700 border border-green-100'
+                    }`}>
+                      {importProgress.includes('Error') || importProgress.includes('failed') ? <XCircle size={16} /> : <CheckCircle size={16} />}
+                      {importProgress}
+                    </div>
+                  )}
+                  
+                  <div className="flex justify-end">
+                    <Button 
+                      onClick={async () => {
+                        if (!formData.bulk_chapter_id) {
+                          setImportProgress('Error: Please select a target chapter first.');
+                          return;
+                        }
+                        
+                        try {
+                          setIsImporting(true);
+                          setImportProgress('Validating JSON...');
+                          
+                          let items;
+                          try {
+                            items = JSON.parse(importJson);
+                          } catch (e) {
+                            throw new Error('Invalid JSON format. Please check for syntax errors.');
+                          }
+                          
+                          if (!Array.isArray(items)) {
+                            throw new Error('JSON must be an array of objects.');
+                          }
+                          
+                          if (items.length === 0) {
+                            throw new Error('JSON array is empty.');
+                          }
+                          
+                          // Validate required fields
+                          for (let i = 0; i < items.length; i++) {
+                            const item = items[i];
+                            if (!item.title) throw new Error(`Item at index ${i} is missing 'title'`);
+                            if (!item.telegram_message_id) throw new Error(`Item at index ${i} is missing 'telegram_message_id'`);
+                          }
+                          
+                          setImportProgress(`Validation passed. Importing ${items.length} videos...`);
+                          
+                          // Get channel ID from chapter
+                          const chapter = allChapters.find(c => c.id === formData.bulk_chapter_id);
+                          const cycle = allCycles.find(c => c.id === chapter?.cycle_id);
+                          const channelId = cycle?.telegram_channel_id || '';
+                          
+                          // Prepare data
+                          const dataToInsert = items.map(item => ({
+                            ...item,
+                            chapter_id: formData.bulk_chapter_id,
+                            telegram_channel_id: channelId,
+                            is_active: true
+                          }));
+                          
+                          const { error } = await supabase.from('videos').insert(dataToInsert);
+                          
+                          if (error) throw error;
+                          
+                          setImportProgress(`Successfully imported ${items.length} videos! Refreshing catalog...`);
+                          await refreshCatalog();
+                          
+                          showToast(`Successfully imported ${items.length} videos`);
+                          setImportJson('');
+                          setTimeout(() => {
+                            setImportProgress('');
+                            setIsImportModalOpen(false);
+                          }, 3000);
+                          
+                        } catch (error: any) {
+                          console.error('Import error:', error);
+                          setImportProgress(`Error: ${error.message}`);
+                        } finally {
+                          setIsImporting(false);
+                        }
+                      }} 
+                      disabled={isImporting || !importJson.trim()}
+                      className="flex items-center gap-2"
+                    >
+                      {isImporting ? 'Importing...' : (
+                        <>
+                          <Upload size={16} />
+                          Validate & Import
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
-          
-          <div className="flex justify-end gap-3 pt-4 border-t border-border">
-            <Button type="button" variant="outline" onClick={() => setIsImportModalOpen(false)} disabled={isImporting}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleBulkImport} 
-              disabled={isImporting || !importJson.trim()}
-              className="flex items-center gap-2"
-            >
-              {isImporting ? 'Importing...' : (
-                <>
-                  <Upload size={16} />
-                  Import Data
-                </>
-              )}
-            </Button>
-          </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 };

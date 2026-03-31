@@ -8,7 +8,11 @@ export const AdminLayout: React.FC = () => {
   const navigate = useNavigate();
 
   if (isLoading) {
-    return <div className="flex h-screen items-center justify-center">Loading...</div>;
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
   }
 
   if (!profile || profile.role !== 'admin') {

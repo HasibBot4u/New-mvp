@@ -5,14 +5,18 @@ import { useAuth } from '../contexts/AuthContext';
 import { useVideoProgress } from '../hooks/useVideoProgress';
 import { Breadcrumb } from '../components/ui/Breadcrumb';
 
+import { useToast } from '../components/ui/Toast';
+
 export function ProfilePage() {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const { getStats } = useVideoProgress();
+  const { showToast } = useToast();
   const [stats, setStats] = useState({ completedCount: 0, hoursWatched: 0, streak: 0 });
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    refreshProfile();
     setStats(getStats());
     setVisible(true);
   }, []);
@@ -100,7 +104,10 @@ export function ProfilePage() {
             </button>
           )}
 
-          <button className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors border-b border-gray-100">
+          <button 
+            onClick={() => showToast('App Settings coming soon!')}
+            className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors border-b border-gray-100"
+          >
             <div className="flex items-center space-x-3 text-gray-700">
               <Settings className="w-5 h-5" />
               <span className="font-medium">App Settings</span>
