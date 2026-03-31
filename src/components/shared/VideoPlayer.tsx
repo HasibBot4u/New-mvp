@@ -43,75 +43,123 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
     setIsStarting(true);
     setHasError(false);
     setErrorMessage('');
-    
-    // Check if backend is alive before setting src
-    // This prevents the "no supported sources" crash on cold start
+
     const BACKENDS = [
       'https://nexusedu-backend-0bjq.onrender.com',
       'https://edbe7e18-233b-4ff5-bed9-83c4e0edd51e-00-25a1ryv2rxe0o.sisko.replit.dev'
     ];
     
-    let workingBackend = '';
-    for (const backend of BACKENDS) {
+    // Step 1: Find a working backend
+    let workingBackend = localStorage.getItem('working_backend') || '';
+    
+    // Verify cached backend is still alive
+    if (workingBackend) {
       try {
-        const res = await fetch(`${backend}/`, { 
-          method: 'GET',
-          signal: AbortSignal.timeout(8000)
+        const check = await fetch(`${workingBackend}/`, {
+          signal: AbortSignal.timeout(5000)
         });
-        if (res.ok) {
-          workingBackend = backend;
-          localStorage.setItem('working_backend', backend);
-          break;
+        if (!check.ok) workingBackend = '';
+      } catch {
+        workingBackend = '';
+      }
+    }
+    
+    // Try all backends if cache is stale
+    if (!workingBackend) {
+      for (const backend of BACKENDS) {
+        try {
+          const res = await fetch(`${backend}/`, {
+            signal: AbortSignal.timeout(8000)
+          });
+          if (res.ok) {
+            workingBackend = backend;
+            localStorage.setItem('working_backend', backend);
+            break;
+          }
+        } catch {
+          continue;
         }
-      } catch (e) {
-        continue;
       }
     }
     
     if (!workingBackend) {
       setIsStarting(false);
       setHasError(true);
-      setErrorMessage('Cannot connect to video server. Please check your internet and try again.');
+      setErrorMessage('Cannot reach video server. Check your connection.');
       return;
     }
-    
-    const url = `${workingBackend}/api/stream/${videoId}`;
-    const video = videoRef.current;
-    
+
+    // Step 2: Warm the message cache BEFORE setting video src.
+    // This is the critical fix — it makes Telegram fetch the message
+    // object BEFORE the browser video element tries to stream,
+    // so when the video src is set, the first byte arrives instantly.
+    try {
+      setErrorMessage('Preparing video...');
+      const prefetch = await fetch(
+        `${workingBackend}/api/prefetch/${videoId}`,
+        { signal: AbortSignal.timeout(12000) }
+      );
+      const data = await prefetch.json();
+      // If prefetch says "not_linked" or "not_found", show clear error
+      if (data.status === 'not_found') {
+        setIsStarting(false);
+        setHasError(true);
+        setErrorMessage('Video not found. Make sure it is added in the admin panel.');
+        return;
+      }
+      if (data.status === 'not_linked') {
+        setIsStarting(false);
+        setHasError(true);
+        setErrorMessage('Video is not linked to Telegram. Set the message_id in the admin panel.');
+        return;
+      }
+    } catch (prefetchErr) {
+      // Prefetch failed but we can still try to play
+      console.warn('Prefetch failed, attempting direct stream:', prefetchErr);
+    }
+
+    // Step 3: Now set the video src — the message is cached so
+    // the first byte will arrive almost instantly
     setIsStarting(false);
     setIsBuffering(true);
+    setErrorMessage('');
     
-    video.src = url;
+    const video = videoRef.current;
+    const streamUrl = `${workingBackend}/api/stream/${videoId}`;
+    video.src = streamUrl;
     video.load();
-    
-    // Use canplay instead of loadedmetadata for more reliability
-    const handleCanPlay = () => {
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          if (err.name === 'AbortError') return;
-          console.error('Play error:', err);
-          setIsBuffering(false);
-          setHasError(true);
-          setErrorMessage('Video failed to play. Try tapping play again.');
-        });
-      }
+
+    // Start playing when enough data arrives
+    const onCanPlay = () => {
+      video.play().catch((err) => {
+        console.error('play() rejected:', err);
+        setIsBuffering(false);
+        // play() rejection is usually autoplay policy, not a real error
+        // Just show the play button again
+        setIsPlaying(false);
+      });
     };
+    video.addEventListener('canplay', onCanPlay, { once: true });
     
-    video.addEventListener('canplay', handleCanPlay, { once: true });
-    
-    // Timeout: if nothing happens in 15 seconds, show error
-    const timeout = setTimeout(() => {
-      video.removeEventListener('canplay', handleCanPlay);
-      if (!isPlaying) {
+    // Safety timeout — if canplay never fires in 20 seconds
+    const timer = setTimeout(() => {
+      video.removeEventListener('canplay', onCanPlay);
+      if (!video.currentTime) {
         setIsBuffering(false);
         setHasError(true);
-        setErrorMessage('Server is taking too long to respond. Tap retry to try again.');
+        setHasStarted(false);
+        setErrorMessage(
+          'Video is taking too long to start. ' +
+          'The server may still be waking up. ' +
+          'Please tap Retry in 30 seconds.'
+        );
       }
-    }, 15000);
+    }, 20000);
     
-    // Clear timeout when video starts playing
-    video.addEventListener('playing', () => clearTimeout(timeout), { once: true });
+    video.addEventListener('playing', () => {
+      clearTimeout(timer);
+      setIsBuffering(false);
+    }, { once: true });
   };
 
   // Load saved settings
@@ -151,22 +199,17 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   };
 
   const togglePlay = useCallback(() => {
-    if (!hasStarted) {
-      startVideo();
+    if (!hasStarted || !videoRef.current) {
+      if (!isStarting) startVideo();
       return;
     }
-    if (!videoRef.current) return;
-    if (videoRef.current.paused) {
-      const playPromise = videoRef.current.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(err => {
-          if (err.name !== 'AbortError') console.error(err);
-        });
-      }
+    const video = videoRef.current;
+    if (video.paused || video.ended) {
+      video.play().catch(console.error);
     } else {
-      videoRef.current.pause();
+      video.pause();
     }
-  }, [hasStarted, videoId]);
+  }, [hasStarted, isStarting, videoId]);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVolume = parseFloat(e.target.value);
@@ -428,12 +471,31 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
         onPlaying={() => { setIsBuffering(false); setIsPlaying(true); }}
         onPause={() => setIsPlaying(false)}
         onEnded={() => { setIsPlaying(false); setShowControls(true); }}
-        onError={() => {
-          setIsBuffering(false);
-          if (hasStarted) {
+        onError={(e) => {
+          const video = e.target as HTMLVideoElement;
+          const errCode = video.error?.code;
+          // Code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED
+          // Code 2 = MEDIA_ERR_NETWORK  
+          // Code 3 = MEDIA_ERR_DECODE
+          if (hasStarted && errCode) {
+            setIsBuffering(false);
             setHasError(true);
             setHasStarted(false);
-            setErrorMessage('Video source error. The server may be starting up — tap Retry in 30 seconds.');
+            if (errCode === 4) {
+              setErrorMessage(
+                'Video format not supported or server returned an error. ' +
+                'Tap Retry — the server may need 30 seconds to warm up.'
+              );
+            } else if (errCode === 2) {
+              setErrorMessage(
+                'Network error while loading video. ' +
+                'Check your connection and tap Retry.'
+              );
+            } else {
+              setErrorMessage(
+                'Video failed to load (error ' + errCode + '). Tap Retry.'
+              );
+            }
           }
         }}
         onContextMenu={(e) => e.preventDefault()}
@@ -442,43 +504,70 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
 
       {/* Initial Play Overlay */}
       {!hasStarted && !hasError && (
-        <div 
-          className="absolute inset-0 bg-black flex flex-col items-center justify-center cursor-pointer z-20"
-          onClick={startVideo}
+        <div
+          className="absolute inset-0 bg-black flex flex-col 
+                     items-center justify-center cursor-pointer z-20"
+          onClick={!isStarting ? startVideo : undefined}
         >
           {isStarting ? (
-            <div className="flex flex-col items-center space-y-3">
-              <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin" />
-              <p className="text-white/70 text-sm font-medium">Connecting to server...</p>
+            <div className="flex flex-col items-center space-y-4">
+              <div className="w-14 h-14 border-4 border-white/20 
+                              border-t-white rounded-full animate-spin" />
+              <p className="text-white font-semibold text-base">
+                {errorMessage || 'Preparing video...'}
+              </p>
+              <p className="text-white/50 text-xs text-center px-8">
+                Connecting to server and warming cache
+              </p>
             </div>
           ) : (
-            <>
-              <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-4 hover:bg-white/20 hover:scale-110 transition-all duration-200">
-                <Play className="w-8 h-8 text-white ml-1" fill="currentColor" />
+            <div className="flex flex-col items-center">
+              <div className="w-20 h-20 bg-white/10 border-2 border-white/20
+                              rounded-full flex items-center justify-center 
+                              mb-4 hover:bg-white/20 hover:scale-105 
+                              transition-all duration-200">
+                <Play className="w-9 h-9 text-white ml-1" fill="currentColor" />
               </div>
-              <p className="text-white/60 text-sm font-medium">Tap to play</p>
-            </>
+              <p className="text-white font-semibold text-base mb-1">
+                Tap to Play
+              </p>
+              <p className="text-white/40 text-xs">
+                Video will start in 1–2 seconds
+              </p>
+            </div>
           )}
         </div>
       )}
 
       {hasError && (
-        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-20 px-6">
-          <div className="text-red-400 text-4xl mb-4">⚠️</div>
-          <p className="text-white text-sm font-medium text-center mb-2">
-            {errorMessage || 'Video failed to load'}
+        <div className="absolute inset-0 bg-gray-950 flex flex-col 
+                        items-center justify-center z-20 px-8">
+          <div className="w-16 h-16 bg-red-500/20 rounded-full 
+                          flex items-center justify-center mb-4">
+            <span className="text-3xl">⚠️</span>
+          </div>
+          <p className="text-white font-bold text-base text-center mb-2">
+            Video Failed to Load
           </p>
-          <p className="text-white/50 text-xs text-center mb-6">
-            The server may be starting up. This can take 30–60 seconds.
+          <p className="text-white/60 text-sm text-center leading-relaxed mb-6">
+            {errorMessage}
           </p>
           <button
             onClick={() => {
               setHasError(false);
               setHasStarted(false);
+              setIsStarting(false);
+              setErrorMessage('');
+              if (videoRef.current) {
+                videoRef.current.src = '';
+                videoRef.current.load();
+              }
             }}
-            className="px-6 py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 transition-colors"
+            className="px-8 py-3 bg-primary text-white rounded-xl 
+                       font-semibold hover:bg-primary/90 
+                       active:scale-95 transition-all"
           >
-            Try Again
+            Retry
           </button>
         </div>
       )}

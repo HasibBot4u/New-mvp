@@ -19,8 +19,10 @@ import { AdminContent } from './pages/admin/AdminContent';
 import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminLogs } from './pages/admin/AdminLogs';
 
+import { AdminSystem } from './pages/admin/AdminSystem';
+
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isLoading } = useAuth();
+  const { user, profile, isLoading } = useAuth();
 
   if (isLoading) {
     return <div className="flex h-screen items-center justify-center">Loading...</div>;
@@ -28,6 +30,10 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (profile?.is_blocked) {
+    return <Navigate to="/login" state={{ blocked: true }} replace />;
   }
 
   return <>{children}</>;
@@ -54,6 +60,7 @@ const AppContent: React.FC = () => {
             <Route path="content" element={<AdminContent />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="logs" element={<AdminLogs />} />
+            <Route path="system" element={<AdminSystem />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

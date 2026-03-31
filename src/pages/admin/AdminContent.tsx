@@ -3,11 +3,13 @@ import { useCatalog } from '../../contexts/CatalogContext';
 import { supabase } from '../../lib/supabase';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { Plus, Edit2, Trash2, Search } from 'lucide-react';
+import { Plus, Edit2, Trash2, Search, Upload, PlayCircle, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
+import { useToast } from '../../components/ui/Toast';
 
 export const AdminContent: React.FC = () => {
   const { catalog, isLoading, refreshCatalog } = useCatalog();
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<'subjects' | 'cycles' | 'chapters' | 'videos'>('subjects');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -15,9 +17,27 @@ export const AdminContent: React.FC = () => {
   const [editingItem, setEditingItem] = useState<any>(null);
   const [formData, setFormData] = useState<any>({});
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Bulk Import State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importJson, setImportJson] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
+  
+  // Stream Test State
+  const [streamTestResult, setStreamTestResult] = useState<{status: 'success' | 'error' | 'testing' | null, message: string}>({status: null, message: ''});
 
   if (isLoading) {
-    return <div>Loading content...</div>;
+    return (
+      <div className="space-y-6 pb-20 animate-pulse">
+        <div className="flex justify-between items-center">
+          <div className="h-8 bg-surface rounded w-1/4"></div>
+          <div className="h-10 bg-surface rounded w-32"></div>
+        </div>
+        <div className="h-12 bg-surface rounded-xl"></div>
+        <div className="h-96 bg-surface rounded-xl"></div>
+      </div>
+    );
   }
 
   const allCycles = catalog?.subjects.flatMap(s => s.cycles) || [];
@@ -52,12 +72,14 @@ export const AdminContent: React.FC = () => {
   const handleEdit = (item: any) => {
     setEditingItem(item);
     setFormData({ ...item });
+    setStreamTestResult({status: null, message: ''});
     setIsModalOpen(true);
   };
 
   const handleAdd = () => {
     setEditingItem(null);
     setFormData({});
+    setStreamTestResult({status: null, message: ''});
     setIsModalOpen(true);
   };
 
@@ -92,9 +114,10 @@ export const AdminContent: React.FC = () => {
       
       setIsModalOpen(false);
       await refreshCatalog();
+      showToast(`${activeTab.slice(0, -1)} saved successfully`);
     } catch (error) {
       console.error(`Error saving ${activeTab}:`, error);
-      alert(`Failed to save ${activeTab.slice(0, -1)}`);
+      showToast(`Failed to save ${activeTab.slice(0, -1)}`);
     } finally {
       setIsSaving(false);
     }
@@ -107,11 +130,84 @@ export const AdminContent: React.FC = () => {
       const { error } = await supabase.from(table).delete().eq('id', id);
       if (error) throw error;
       
-      // Refresh catalog after deletion
       await refreshCatalog();
+      showToast(`${table.slice(0, -1)} deleted successfully`);
     } catch (error) {
       console.error(`Error deleting from ${table}:`, error);
-      alert(`Failed to delete ${table.slice(0, -1)}`);
+      showToast(`Failed to delete ${table.slice(0, -1)}`);
+    }
+  };
+
+  const toggleVideoActive = async (id: string, currentStatus: boolean) => {
+    try {
+      const { error } = await supabase.from('videos').update({ is_active: !currentStatus }).eq('id', id);
+      if (error) throw error;
+      await refreshCatalog();
+      showToast(`Video ${!currentStatus ? 'activated' : 'deactivated'}`);
+    } catch (error) {
+      console.error('Error toggling video status:', error);
+      showToast('Failed to update video status');
+    }
+  };
+
+  const testStream = async () => {
+    if (!editingItem?.id) return;
+    
+    setStreamTestResult({ status: 'testing', message: 'Testing stream connection...' });
+    
+    try {
+      const backend = localStorage.getItem('working_backend') || 'https://nexusedu-backend-0bjq.onrender.com';
+      const response = await fetch(`${backend}/api/stream/${editingItem.id}`, {
+        headers: {
+          'Range': 'bytes=0-1024'
+        }
+      });
+      
+      if (response.status === 206 || response.status === 200) {
+        setStreamTestResult({ status: 'success', message: `Success! Received ${response.status} from backend.` });
+      } else {
+        setStreamTestResult({ status: 'error', message: `Error: Received status ${response.status}` });
+      }
+    } catch (error: any) {
+      setStreamTestResult({ status: 'error', message: `Network error: ${error.message}` });
+    }
+  };
+
+  const handleBulkImport = async () => {
+    try {
+      setIsImporting(true);
+      setImportProgress('Parsing JSON...');
+      
+      let items;
+      try {
+        items = JSON.parse(importJson);
+      } catch (e) {
+        throw new Error('Invalid JSON format');
+      }
+      
+      if (!Array.isArray(items)) {
+        throw new Error('JSON must be an array of objects');
+      }
+      
+      setImportProgress(`Importing ${items.length} items...`);
+      
+      // Basic validation and batch insert
+      const { error } = await supabase.from(activeTab).insert(items);
+      
+      if (error) throw error;
+      
+      setImportProgress('Import complete! Refreshing catalog...');
+      await refreshCatalog();
+      
+      showToast(`Successfully imported ${items.length} items`);
+      setIsImportModalOpen(false);
+      setImportJson('');
+    } catch (error: any) {
+      console.error('Import error:', error);
+      showToast(`Import failed: ${error.message || 'Unknown error'}`);
+      setImportProgress(`Error: ${error.message}`);
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -221,30 +317,36 @@ export const AdminContent: React.FC = () => {
       case 'videos':
         return (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-text-secondary">
+            <table className="w-full text-left text-sm text-text-secondary whitespace-nowrap">
               <thead className="bg-surface text-xs uppercase text-text-primary border-b border-border">
                 <tr>
                   <th className="px-6 py-3">Title</th>
                   <th className="px-6 py-3">Chapter</th>
-                  <th className="px-6 py-3">Cycle</th>
-                  <th className="px-6 py-3">Order</th>
+                  <th className="px-6 py-3">Msg ID</th>
+                  <th className="px-6 py-3">Channel ID</th>
                   <th className="px-6 py-3">Duration</th>
-                  <th className="px-6 py-3">Size</th>
+                  <th className="px-6 py-3">Active</th>
                   <th className="px-6 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredVideos.map((video) => {
                   const chapter = allChapters.find(c => c.id === video.chapter_id);
-                  const cycle = allCycles.find(c => c.id === chapter?.cycle_id);
                   return (
                     <tr key={video.id} className="border-b border-border hover:bg-surface/50">
-                      <td className="px-6 py-4 font-medium text-text-primary truncate max-w-xs">{video.title}</td>
+                      <td className="px-6 py-4 font-medium text-text-primary truncate max-w-[200px]" title={video.title}>{video.title}</td>
                       <td className="px-6 py-4"><Badge variant="outline">{chapter?.name}</Badge></td>
-                      <td className="px-6 py-4"><Badge variant="outline">{cycle?.name}</Badge></td>
-                      <td className="px-6 py-4">{video.display_order}</td>
+                      <td className="px-6 py-4 font-mono text-xs">{video.telegram_message_id}</td>
+                      <td className="px-6 py-4 font-mono text-xs">{video.telegram_channel_id}</td>
                       <td className="px-6 py-4 text-text-secondary">{video.duration}</td>
-                      <td className="px-6 py-4 text-text-secondary">{video.size_mb} MB</td>
+                      <td className="px-6 py-4">
+                        <button
+                          onClick={() => toggleVideoActive(video.id, video.is_active !== false)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${video.is_active !== false ? 'bg-green-500' : 'bg-gray-600'}`}
+                        >
+                          <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${video.is_active !== false ? 'translate-x-5' : 'translate-x-1'}`} />
+                        </button>
+                      </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2">
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEdit(video)}><Edit2 size={14} /></Button>
@@ -264,16 +366,22 @@ export const AdminContent: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Content Management</h1>
           <p className="text-text-secondary text-sm">Manage subjects, cycles, chapters, and videos</p>
         </div>
-        <Button className="flex items-center gap-2" onClick={handleAdd}>
-          <Plus size={16} />
-          Add New {activeTab.slice(0, -1)}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="flex items-center gap-2" onClick={() => setIsImportModalOpen(true)}>
+            <Upload size={16} />
+            Bulk Import
+          </Button>
+          <Button className="flex items-center gap-2" onClick={handleAdd}>
+            <Plus size={16} />
+            Add New {activeTab.slice(0, -1)}
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border bg-background shadow-sm overflow-hidden">
@@ -313,6 +421,7 @@ export const AdminContent: React.FC = () => {
         {renderContent()}
       </div>
 
+      {/* Add/Edit Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -508,6 +617,36 @@ export const AdminContent: React.FC = () => {
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
+              
+              {editingItem && (
+                <div className="pt-4 border-t border-border mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-medium text-text-primary">Stream Test</label>
+                    <button
+                      type="button"
+                      onClick={testStream}
+                      disabled={streamTestResult.status === 'testing'}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 text-primary rounded-md text-xs font-medium hover:bg-primary/20 transition-colors disabled:opacity-50"
+                    >
+                      <PlayCircle className="w-3.5 h-3.5" />
+                      Test Connection
+                    </button>
+                  </div>
+                  
+                  {streamTestResult.status && (
+                    <div className={`p-3 rounded-lg text-xs flex items-start gap-2 ${
+                      streamTestResult.status === 'success' ? 'bg-green-500/10 text-green-500' :
+                      streamTestResult.status === 'error' ? 'bg-red-500/10 text-red-500' :
+                      'bg-blue-500/10 text-blue-500'
+                    }`}>
+                      {streamTestResult.status === 'success' && <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />}
+                      {streamTestResult.status === 'error' && <XCircle className="w-4 h-4 shrink-0 mt-0.5" />}
+                      {streamTestResult.status === 'testing' && <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin shrink-0 mt-0.5" />}
+                      <span>{streamTestResult.message}</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -520,6 +659,52 @@ export const AdminContent: React.FC = () => {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Bulk Import Modal */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => !isImporting && setIsImportModalOpen(false)}
+        title={`Bulk Import ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}`}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">
+            Paste a JSON array of objects to import multiple records at once. 
+            Ensure the fields match the database schema for the <strong className="text-text-primary">{activeTab}</strong> table.
+          </p>
+          
+          <textarea
+            value={importJson}
+            onChange={(e) => setImportJson(e.target.value)}
+            placeholder="[\n  {\n    &quot;name&quot;: &quot;Example&quot;,\n    &quot;display_order&quot;: 1\n  }\n]"
+            className="w-full h-64 rounded-md border border-border bg-background px-3 py-2 text-sm font-mono focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            disabled={isImporting}
+          />
+          
+          {importProgress && (
+            <div className={`p-3 rounded-lg text-sm ${importProgress.includes('Error') ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
+              {importProgress}
+            </div>
+          )}
+          
+          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+            <Button type="button" variant="outline" onClick={() => setIsImportModalOpen(false)} disabled={isImporting}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleBulkImport} 
+              disabled={isImporting || !importJson.trim()}
+              className="flex items-center gap-2"
+            >
+              {isImporting ? 'Importing...' : (
+                <>
+                  <Upload size={16} />
+                  Import Data
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

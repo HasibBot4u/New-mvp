@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate, Navigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { supabase, logActivity } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
@@ -12,9 +12,18 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const location = useLocation();
+  const { user, signOut } = useAuth();
+  
+  const isBlocked = location.state?.blocked;
 
-  if (user) {
+  useEffect(() => {
+    if (isBlocked && user) {
+      signOut();
+    }
+  }, [isBlocked, user, signOut]);
+
+  if (user && !isBlocked) {
     return <Navigate to="/" replace />;
   }
 
@@ -113,7 +122,12 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12 sm:px-6 lg:px-8 flex-col">
+      {isBlocked && (
+        <div className="w-full max-w-md mb-4 rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200 text-center font-medium">
+          Your account has been blocked by an administrator. Contact support if you believe this is a mistake.
+        </div>
+      )}
       <div className="w-full max-w-md space-y-8 rounded-2xl border border-border bg-surface p-8 shadow-sm">
         <div className="text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-2xl font-bold text-white">
