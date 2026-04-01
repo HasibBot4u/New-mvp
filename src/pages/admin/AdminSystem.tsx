@@ -35,8 +35,13 @@ export const AdminSystem: React.FC = () => {
       const backend = await getWorkingBackend();
       const res = await fetch(`${backend}/api/health`);
       if (res.ok) {
-        const data = await res.json();
-        setHealth(data);
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          setHealth(data);
+        } catch (e) {
+          console.error('Invalid JSON from health endpoint:', text.substring(0, 100));
+        }
       }
     } catch (err) {
       console.error('Error fetching health:', err);
@@ -86,9 +91,15 @@ export const AdminSystem: React.FC = () => {
       const backend = await getWorkingBackend();
       const res = await fetch(`${backend}/api/debug`);
       if (res.ok) {
-        const data = await res.json();
-        setDebugData(data);
-        setShowDebugModal(true);
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          setDebugData(data);
+          setShowDebugModal(true);
+        } catch (e) {
+          showToast('Invalid JSON from debug endpoint');
+          console.error('Invalid JSON from debug endpoint:', text.substring(0, 100));
+        }
       } else {
         showToast('Failed to fetch debug info');
       }

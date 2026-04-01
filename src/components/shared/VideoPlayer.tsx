@@ -131,13 +131,18 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
 
     // Start playing when enough data arrives
     const onCanPlay = () => {
-      video.play().catch((err) => {
-        console.error('play() rejected:', err);
-        setIsBuffering(false);
-        // play() rejection is usually autoplay policy, not a real error
-        // Just show the play button again
-        setIsPlaying(false);
-      });
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          if (err.name !== 'AbortError') {
+            console.error('play() rejected:', err);
+            setIsBuffering(false);
+            // play() rejection is usually autoplay policy, not a real error
+            // Just show the play button again
+            setIsPlaying(false);
+          }
+        });
+      }
     };
     video.addEventListener('canplay', onCanPlay, { once: true });
     
@@ -205,7 +210,14 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
     }
     const video = videoRef.current;
     if (video.paused || video.ended) {
-      video.play().catch(console.error);
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          if (error.name !== 'AbortError') {
+            console.error('play() rejected:', error);
+          }
+        });
+      }
     } else {
       video.pause();
     }

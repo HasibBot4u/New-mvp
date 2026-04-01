@@ -17,7 +17,8 @@ export function ProfilePage() {
 
   useEffect(() => {
     const init = async () => {
-      await refreshProfile();
+      // Run in background so it doesn't block UI if Supabase hangs
+      refreshProfile().catch(console.error);
       setStats(getStats());
       setVisible(true);
     };

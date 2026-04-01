@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useCatalog } from '../../contexts/CatalogContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { Users, Video, BookOpen, Layers, RefreshCw, Activity, ShieldAlert, CheckCircle, XCircle, Clock, Server, Download, PlayCircle, Ban, AlertTriangle, FileText } from 'lucide-react';
+import { Users, Video, BookOpen, Layers, RefreshCw, Activity, CheckCircle, XCircle, Clock, Server, Download, PlayCircle, Ban, AlertTriangle, FileText, Zap, Bug } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { Modal } from '../../components/ui/Modal';
 import { useToast } from '../../components/ui/Toast';
 import { formatRelativeTime } from '../../lib/utils';
 import { Link } from 'react-router-dom';
@@ -34,6 +35,9 @@ export const AdminDashboard: React.FC = () => {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [isHealthLoading, setIsHealthLoading] = useState(false);
   const [isWarmingUp, setIsWarmingUp] = useState(false);
+  const [isDebugLoading, setIsDebugLoading] = useState(false);
+  const [showDebugModal, setShowDebugModal] = useState(false);
+  const [debugData, setDebugData] = useState<any>(null);
   const [recentSignups, setRecentSignups] = useState<any[]>([]);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -103,8 +107,13 @@ export const AdminDashboard: React.FC = () => {
       const backend = await getWorkingBackend();
       const response = await fetch(`${backend}/api/health`);
       if (response.ok) {
-        const data = await response.json();
-        setHealth(data);
+        const text = await response.text();
+        try {
+          const data = JSON.parse(text);
+          setHealth(data);
+        } catch (e) {
+          console.error('Invalid JSON from health endpoint:', text.substring(0, 100));
+        }
       }
     } catch (error) {
       console.error('Health check failed:', error);
@@ -136,6 +145,31 @@ export const AdminDashboard: React.FC = () => {
       showToast('Connection error during warmup');
     } finally {
       setIsWarmingUp(false);
+    }
+  };
+
+  const handleViewDebug = async () => {
+    setIsDebugLoading(true);
+    try {
+      const backend = await getWorkingBackend();
+      const res = await fetch(`${backend}/api/debug`);
+      if (res.ok) {
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          setDebugData(data);
+          setShowDebugModal(true);
+        } catch (e) {
+          showToast('Invalid JSON from debug endpoint');
+          console.error('Invalid JSON from debug endpoint:', text.substring(0, 100));
+        }
+      } else {
+        showToast('Failed to fetch debug info');
+      }
+    } catch (err) {
+      showToast('Error connecting to backend');
+    } finally {
+      setIsDebugLoading(false);
     }
   };
 
@@ -226,89 +260,94 @@ export const AdminDashboard: React.FC = () => {
         ))}
       </div>
 
-      {/* Backend Health & Quick Actions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-surface rounded-xl border border-border shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-border flex justify-between items-center bg-gray-50/50">
-            <h2 className="text-lg font-bold flex items-center gap-2">
-              <Server size={20} className="text-primary" />
-              Backend Health
-            </h2>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={fetchHealth} isLoading={isHealthLoading}>
-                <RefreshCw size={14} className="mr-2" /> Refresh
-              </Button>
-              <Button variant="primary" size="sm" onClick={handleForceWarmup} isLoading={isWarmingUp}>
-                Force Warmup
-              </Button>
+      {/* Backend Health */}
+      <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-border flex justify-between items-center bg-gray-50/50">
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <Server size={20} className="text-primary" />
+            Backend Health
+          </h2>
+          <Button variant="outline" size="sm" onClick={fetchHealth} isLoading={isHealthLoading}>
+            <RefreshCw size={14} className="mr-2" /> Refresh
+          </Button>
+        </div>
+        <div className="p-5">
+          {health ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
+                <p className="text-xs text-text-secondary mb-1">Status</p>
+                <div className="flex items-center gap-2">
+                  {health.status === 'ok' ? (
+                    <><CheckCircle size={16} className="text-green-500" /><span className="font-medium text-green-700">Healthy</span></>
+                  ) : (
+                    <><AlertTriangle size={16} className="text-amber-500" /><span className="font-medium text-amber-700">Degraded</span></>
+                  )}
+                </div>
+              </div>
+              <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
+                <p className="text-xs text-text-secondary mb-1">Telegram</p>
+                <div className="flex items-center gap-2">
+                  {health.telegram_connected ? (
+                    <><CheckCircle size={16} className="text-green-500" /><span className="font-medium text-green-700">Connected</span></>
+                  ) : (
+                    <><XCircle size={16} className="text-red-500" /><span className="font-medium text-red-700">Disconnected</span></>
+                  )}
+                </div>
+              </div>
+              <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
+                <p className="text-xs text-text-secondary mb-1">Resolved Channels</p>
+                <p className="font-medium text-text-primary">{health.resolved_channels}</p>
+              </div>
+              <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
+                <p className="text-xs text-text-secondary mb-1">Catalog Age</p>
+                <p className="font-medium text-text-primary">{health.catalog_age_minutes?.toFixed(1) || '0.0'} mins</p>
+              </div>
             </div>
-          </div>
-          <div className="p-5">
-            {health ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
-                  <p className="text-xs text-text-secondary mb-1">Status</p>
-                  <div className="flex items-center gap-2">
-                    {health.status === 'ok' ? (
-                      <><CheckCircle size={16} className="text-green-500" /><span className="font-medium text-green-700">Healthy</span></>
-                    ) : (
-                      <><AlertTriangle size={16} className="text-amber-500" /><span className="font-medium text-amber-700">Degraded</span></>
-                    )}
-                  </div>
-                </div>
-                <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
-                  <p className="text-xs text-text-secondary mb-1">Telegram</p>
-                  <div className="flex items-center gap-2">
-                    {health.telegram_connected ? (
-                      <><CheckCircle size={16} className="text-green-500" /><span className="font-medium text-green-700">Connected</span></>
-                    ) : (
-                      <><XCircle size={16} className="text-red-500" /><span className="font-medium text-red-700">Disconnected</span></>
-                    )}
-                  </div>
-                </div>
-                <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
-                  <p className="text-xs text-text-secondary mb-1">Resolved Channels</p>
-                  <p className="font-medium text-text-primary">{health.resolved_channels}</p>
-                </div>
-                <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
-                  <p className="text-xs text-text-secondary mb-1">Catalog Age</p>
-                  <p className="font-medium text-text-primary">{health.catalog_age_minutes?.toFixed(1) || '0.0'} mins</p>
-                </div>
-              </div>
-            ) : (
-              <div className="text-center py-8 text-text-secondary">
-                {isHealthLoading ? 'Loading health data...' : 'Health data unavailable'}
-              </div>
-            )}
-          </div>
+          ) : (
+            <div className="text-center py-8 text-text-secondary">
+              {isHealthLoading ? 'Loading health data...' : 'Health data unavailable'}
+            </div>
+          )}
         </div>
+      </div>
 
-        <div className="bg-surface rounded-xl border border-border shadow-sm overflow-hidden">
-          <div className="p-5 border-b border-border bg-gray-50/50">
-            <h2 className="text-lg font-bold">Quick Actions</h2>
-          </div>
-          <div className="p-5 flex flex-col gap-3">
-            <Button 
-              variant="outline" 
-              className="w-full justify-start" 
-              onClick={() => refreshCatalog()}
-              isLoading={isCatalogLoading}
-            >
-              <RefreshCw size={18} className="mr-3 text-blue-500" />
-              Refresh Catalog Cache
-            </Button>
-            <Button variant="outline" className="w-full justify-start" onClick={handleExportUsers}>
-              <Download size={18} className="mr-3 text-green-500" />
-              Export Users CSV
-            </Button>
-            <Link to="/admin/system">
-              <Button variant="outline" className="w-full justify-start">
-                <ShieldAlert size={18} className="mr-3 text-amber-500" />
-                System Controls
-              </Button>
-            </Link>
-          </div>
-        </div>
+      {/* Quick Actions Row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Button 
+          variant="outline" 
+          className="h-auto py-4 flex flex-col items-center justify-center gap-2 bg-surface" 
+          onClick={() => refreshCatalog()}
+          isLoading={isCatalogLoading}
+        >
+          <RefreshCw size={24} className="text-blue-500" />
+          <span>Refresh Catalog</span>
+        </Button>
+        <Button 
+          variant="outline" 
+          className="h-auto py-4 flex flex-col items-center justify-center gap-2 bg-surface" 
+          onClick={handleForceWarmup} 
+          isLoading={isWarmingUp}
+        >
+          <Zap size={24} className="text-amber-500" />
+          <span>Force Warmup</span>
+        </Button>
+        <Button 
+          variant="outline" 
+          className="h-auto py-4 flex flex-col items-center justify-center gap-2 bg-surface" 
+          onClick={handleViewDebug} 
+          isLoading={isDebugLoading}
+        >
+          <Bug size={24} className="text-purple-500" />
+          <span>View Debug Info</span>
+        </Button>
+        <Button 
+          variant="outline" 
+          className="h-auto py-4 flex flex-col items-center justify-center gap-2 bg-surface" 
+          onClick={handleExportUsers}
+        >
+          <Download size={24} className="text-green-500" />
+          <span>Export User List (CSV)</span>
+        </Button>
       </div>
 
       {/* Recent Activity & Signups */}
@@ -438,6 +477,28 @@ export const AdminDashboard: React.FC = () => {
           </table>
         </div>
       </div>
+
+      <Modal
+        isOpen={showDebugModal}
+        onClose={() => setShowDebugModal(false)}
+        title="Backend Debug Information"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">
+            Raw diagnostic data from the backend server.
+          </p>
+          <div className="bg-gray-900 rounded-lg p-4 overflow-x-auto">
+            <pre className="text-xs text-green-400 font-mono">
+              {debugData ? JSON.stringify(debugData, null, 2) : 'No data available'}
+            </pre>
+          </div>
+          <div className="flex justify-end pt-4">
+            <Button variant="outline" onClick={() => setShowDebugModal(false)}>
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

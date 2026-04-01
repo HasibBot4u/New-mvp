@@ -246,6 +246,46 @@ async def refresh_catalog():
 
 
 # ─── LIFESPAN ─────────────────────────────────────────────────
+async def ensure_telegram_connected():
+    """
+    Checks if the Telegram client is connected.
+    If not, attempts to reconnect automatically.
+    Called before every stream request and by the watchdog.
+    """
+    global tg
+    try:
+        if tg is None or not tg.is_connected:
+            print("[NexusEdu] Telegram disconnected, reconnecting...")
+            if tg is not None:
+                try:
+                    await tg.stop()
+                except Exception:
+                    pass
+            tg = Client(
+                "nexusedu_session",
+                api_id=API_ID,
+                api_hash=API_HASH,
+                session_string=SESSION_STRING,
+                in_memory=True,
+            )
+            await tg.start()
+            await preload_channels()
+            print("[NexusEdu] Telegram reconnected successfully.")
+            return True
+        return True
+    except Exception as e:
+        print(f"[NexusEdu] Reconnect failed: {e}")
+        return False
+
+async def telegram_watchdog():
+    """
+    Runs in background every 60 seconds.
+    Reconnects Telegram if it drops.
+    """
+    while True:
+        await asyncio.sleep(60)
+        await ensure_telegram_connected()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global tg
@@ -262,6 +302,7 @@ async def lifespan(app: FastAPI):
     await preload_channels()
     await resolve_channel(TEST_CHANNEL_ID)
     await refresh_catalog()
+    asyncio.create_task(telegram_watchdog())
     yield
     print("[NexusEdu] Stopping Telegram client...")
     await tg.stop()
@@ -338,7 +379,7 @@ async def health():
     connected = tg is not None and tg.is_connected
     return {
         "status":              "ok" if connected else "degraded",
-        "telegram":            "connected" if connected else "disconnected",
+        "telegram":            "connected" if connected else "reconnecting",
         "videos_cached":       len(video_map),
         "messages_cached":     len(message_cache),
         "channels_resolved":   len(resolved_channels),
@@ -463,6 +504,12 @@ async def stream_video(video_id: str, request: Request):
         await refresh_catalog()
     if video_id not in video_map:
         raise HTTPException(404, "Video not found")
+
+    connected = await ensure_telegram_connected()
+    if not connected:
+        raise HTTPException(503, 
+            "Telegram client is not connected. "
+            "The server is reconnecting. Please retry in 30 seconds.")
 
     info       = video_map[video_id]
     channel_id = int(info["channel_id"])
