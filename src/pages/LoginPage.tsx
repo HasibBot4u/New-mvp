@@ -77,19 +77,15 @@ export const LoginPage: React.FC = () => {
           // to prevent them from being completely stuck, but we log the error.
         }
         
-        if (!profile && !profileError) {
-          // Profile doesn't exist yet, create it
-          const { error: insertError } = await supabase
-            .from('profiles')
-            .upsert({
-              id: data.user.id,
-              email: data.user.email,
-              display_name: data.user.email?.split('@')[0] || 'User',
-              role: 'user',
-            }, { onConflict: 'id', ignoreDuplicates: true });
-          if (insertError) {
-            console.error('Error creating profile:', insertError);
-          }
+        if (!profile && (!profileError || 
+            profileError.code === 'PGRST116')) {
+          await supabase.from('profiles').upsert({
+            id: data.user.id,
+            email: data.user.email,
+            display_name: 
+              data.user.email?.split('@')[0] || 'User',
+            role: 'user',
+          }, { onConflict: 'id', ignoreDuplicates: true });
         }
         
         if (profile?.role === 'admin') {

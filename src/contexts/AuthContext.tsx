@@ -14,127 +14,130 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> 
+  = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    let mounted = true;
-
-    // Global failsafe timeout to ensure we never get stuck on the loading screen
-    const failsafeTimer = setTimeout(() => {
-      if (mounted && isLoading) {
-        console.warn('Auth initialization timed out, forcing isLoading to false');
-        setIsLoading(false);
-      }
-    }, 3000);
-
-    const initialize = async () => {
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error('Error getting session:', error.message);
-          if (error.message.includes('Refresh Token') || error.message.includes('refresh_token')) {
-            await supabase.auth.signOut().catch(console.error);
-          }
-        }
-
-        if (mounted) {
-          setSession(session);
-          setUser(session?.user ?? null);
-          
-          if (session?.user) {
-            await fetchProfile(session.user.id);
-          } else {
-            setIsLoading(false);
-          }
-        }
-      } catch (err) {
-        console.error('Unexpected error during auth initialization:', err);
-        if (mounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    initialize();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
-
-      if (event === 'SIGNED_OUT') {
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-        setIsLoading(false);
-        return;
-      }
-
-      setSession(session);
-      
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      
-      if (currentUser) {
-        await fetchProfile(currentUser.id);
-      } else {
-        setProfile(null);
-        setIsLoading(false);
-      }
-    });
-
-    return () => {
-      mounted = false;
-      clearTimeout(failsafeTimer);
-      subscription.unsubscribe();
-    };
-  }, []);
-
   const fetchProfile = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error fetching profile:', error);
-      } else if (data) {
-        setProfile(data as Profile);
-      } else {
-        setProfile(null);
+    // Retry up to 3 times with 2 second gaps
+    // This handles Supabase cold starts gracefully
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        if (error) {
+          console.error(
+            `Profile fetch attempt ${attempt} failed:`, error
+          );
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+        } else if (data) {
+          setProfile(data as Profile);
+          return;
+        }
+      } catch (e) {
+        console.error(`Profile fetch attempt ${attempt} exception:`, e);
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
-    } catch (error) {
-      console.error('Error in fetchProfile:', error);
-    } finally {
-      setIsLoading(false);
+    }
+    // All 3 attempts failed
+    // Try to read from localStorage cache as last resort
+    const cached = localStorage.getItem('nexusedu_profile_cache');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        setProfile(parsed as Profile);
+        console.warn('Using cached profile due to Supabase error');
+      } catch (e) {
+        console.error('Failed to parse cached profile');
+      }
     }
   };
 
   const refreshProfile = async () => {
     if (!user) return;
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-    if (!error && data) {
-      setProfile(data as Profile);
+    await fetchProfile(user.id);
+  };
+
+  useEffect(() => {
+    let mounted = true;
+
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = 
+          await supabase.auth.getSession();
+        if (!mounted) return;
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        }
+      } catch (e) {
+        console.error('Auth init error:', e);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    // No artificial timeout — let it wait properly
+    initAuth();
+
+    const { data: { subscription } } =
+      supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (!mounted) return;
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+        } else {
+          setProfile(null);
+          localStorage.removeItem('nexusedu_profile_cache');
+        }
+        setIsLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Cache the profile whenever it changes
+  useEffect(() => {
+    if (profile) {
+      localStorage.setItem(
+        'nexusedu_profile_cache', 
+        JSON.stringify(profile)
+      );
+    }
+  }, [profile]);
+
+  const signOut = async () => {
+    try {
+      localStorage.removeItem('nexusedu_profile_cache');
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.error('Sign out error:', e);
+      // Force sign out even if Supabase is unreachable
+      localStorage.clear();
+      window.location.href = '/login';
     }
   };
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
-  };
-
   return (
-    <AuthContext.Provider value={{ session, user, profile, isLoading, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ 
+      session, user, profile, isLoading, signOut, refreshProfile 
+    }}>
       {children}
     </AuthContext.Provider>
   );

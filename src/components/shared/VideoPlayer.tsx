@@ -89,33 +89,59 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
       return;
     }
 
-    // Step 2: Warm the message cache BEFORE setting video src.
-    // This is the critical fix — it makes Telegram fetch the message
-    // object BEFORE the browser video element tries to stream,
-    // so when the video src is set, the first byte arrives instantly.
-    try {
-      setErrorMessage('Preparing video...');
-      const prefetch = await fetch(
-        `${workingBackend}/api/prefetch/${videoId}`,
-        { signal: AbortSignal.timeout(12000) }
+    // Step 2: Prefetch with retries
+    // Render.com can take up to 60s to wake up
+    setErrorMessage('Preparing video...');
+    let prefetchOk = false;
+    
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const prefetchRes = await fetch(
+          workingBackend + '/api/prefetch/' + videoId,
+          { signal: AbortSignal.timeout(15000) }
+        );
+        if (prefetchRes.ok) {
+          const data = await prefetchRes.json();
+          if (data.status === 'not_found') {
+            setIsStarting(false);
+            setHasError(true);
+            setErrorMessage(
+              'Video not found in catalog. ' +
+              'Check that it is added in the admin panel.'
+            );
+            return;
+          }
+          if (data.status === 'not_linked') {
+            setIsStarting(false);
+            setHasError(true);
+            setErrorMessage(
+              'Video is not linked to Telegram. ' +
+              'Set the Message ID in the admin panel.'
+            );
+            return;
+          }
+          prefetchOk = true;
+          break;
+        }
+      } catch (e) {
+        console.warn(
+          'Prefetch attempt ' + attempt + ' failed:', e
+        );
+        if (attempt < 3) {
+          setErrorMessage(
+            'Server is waking up... attempt ' + 
+            attempt + '/3'
+          );
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      }
+    }
+    
+    if (!prefetchOk) {
+      console.warn(
+        'All prefetch attempts failed, trying direct stream'
       );
-      const data = await prefetch.json();
-      // If prefetch says "not_linked" or "not_found", show clear error
-      if (data.status === 'not_found') {
-        setIsStarting(false);
-        setHasError(true);
-        setErrorMessage('Video not found. Make sure it is added in the admin panel.');
-        return;
-      }
-      if (data.status === 'not_linked') {
-        setIsStarting(false);
-        setHasError(true);
-        setErrorMessage('Video is not linked to Telegram. Set the message_id in the admin panel.');
-        return;
-      }
-    } catch (prefetchErr) {
-      // Prefetch failed but we can still try to play
-      console.warn('Prefetch failed, attempting direct stream:', prefetchErr);
+      // Continue anyway — the stream might still work
     }
 
     // Step 3: Now set the video src — the message is cached so
