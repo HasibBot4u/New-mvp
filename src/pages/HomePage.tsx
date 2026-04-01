@@ -14,10 +14,37 @@ export function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const { results: searchResults } = useSearch(searchQuery);
   const [visible, setVisible] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
 
   useEffect(() => {
     setVisible(true);
+    
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBanner(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
   }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the install prompt');
+        }
+        setDeferredPrompt(null);
+        setShowInstallBanner(false);
+      });
+    }
+  };
 
   const stats = useMemo(() => getStats(), [updateTrigger]);
 
@@ -220,6 +247,35 @@ export function HomePage() {
           </div>
         )}
       </main>
+
+      {/* PWA Install Banner */}
+      {showInstallBanner && (
+        <div className="fixed bottom-20 left-4 right-4 md:left-auto md:right-8 md:bottom-8 md:w-96 bg-white rounded-2xl shadow-2xl border border-gray-100 p-4 z-50 animate-in slide-in-from-bottom-5">
+          <div className="flex items-start justify-between mb-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-bold">
+                N
+              </div>
+              <div>
+                <h4 className="font-bold text-gray-900">Install NexusEdu</h4>
+                <p className="text-xs text-gray-500">Add to home screen for quick access</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setShowInstallBanner(false)}
+              className="text-gray-400 hover:text-gray-600 p-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <button 
+            onClick={handleInstallClick}
+            className="w-full py-2 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm"
+          >
+            Install App
+          </button>
+        </div>
+      )}
     </div>
   );
 }

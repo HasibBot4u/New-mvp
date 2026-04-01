@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useCatalog } from '../../contexts/CatalogContext';
 import { useToast } from '../../components/ui/Toast';
-import { Activity, RefreshCw, Zap, Bug, Database, Settings as SettingsIcon, ShieldAlert, CheckCircle, XCircle } from 'lucide-react';
+import { Activity, RefreshCw, Zap, Bug, Database, Settings as SettingsIcon, ShieldAlert, CheckCircle, XCircle, Key, Plus, Trash2 } from 'lucide-react';
 import { getWorkingBackend } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 
 interface HealthData {
   status: string;
@@ -30,31 +31,113 @@ export const AdminSystem: React.FC = () => {
     localStorage.getItem('registrations_open') !== 'false'
   );
 
+  const [enrollmentCodes, setEnrollmentCodes] = useState<any[]>([]);
+  const [newCodeName, setNewCodeName] = useState('');
+  const [newCodeMaxUses, setNewCodeMaxUses] = useState(1);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+
   const fetchHealth = async () => {
     try {
       const backend = await getWorkingBackend();
       const res = await fetch(`${backend}/api/health`);
       if (res.ok) {
-        const text = await res.text();
-        try {
-          const data = JSON.parse(text);
-          setHealth(data);
-        } catch (e) {
-          console.error('Invalid JSON from health endpoint:', text.substring(0, 100));
-        }
+        const data = await res.json();
+        setHealth(data);
+      } else {
+        setHealth(null);
       }
     } catch (err) {
-      console.error('Error fetching health:', err);
+      setHealth(null);
     } finally {
       setIsHealthLoading(false);
     }
   };
 
+  const fetchEnrollmentCodes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('enrollment_codes')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setEnrollmentCodes(data || []);
+    } catch (err) {
+      console.error('Error fetching enrollment codes:', err);
+    }
+  };
+
   useEffect(() => {
     fetchHealth();
+    fetchEnrollmentCodes();
     const interval = setInterval(fetchHealth, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const generateEnrollmentCode = async () => {
+    if (!newCodeName.trim()) {
+      showToast('Please enter a description for the code');
+      return;
+    }
+    
+    setIsGeneratingCode(true);
+    try {
+      const code = Math.random().toString(36).substring(2, 10).toUpperCase();
+      
+      const { error } = await supabase
+        .from('enrollment_codes')
+        .insert({
+          code,
+          description: newCodeName,
+          max_uses: newCodeMaxUses,
+          current_uses: 0,
+          is_active: true
+        });
+        
+      if (error) throw error;
+      
+      showToast(`Code ${code} generated successfully`);
+      setNewCodeName('');
+      setNewCodeMaxUses(1);
+      fetchEnrollmentCodes();
+    } catch (err) {
+      console.error('Error generating code:', err);
+      showToast('Failed to generate code');
+    } finally {
+      setIsGeneratingCode(false);
+    }
+  };
+
+  const toggleCodeStatus = async (id: string, currentStatus: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('enrollment_codes')
+        .update({ is_active: !currentStatus })
+        .eq('id', id);
+        
+      if (error) throw error;
+      fetchEnrollmentCodes();
+    } catch (err) {
+      console.error('Error toggling code status:', err);
+      showToast('Failed to update code status');
+    }
+  };
+
+  const deleteCode = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this code?')) return;
+    try {
+      const { error } = await supabase
+        .from('enrollment_codes')
+        .delete()
+        .eq('id', id);
+        
+      if (error) throw error;
+      fetchEnrollmentCodes();
+      showToast('Code deleted successfully');
+    } catch (err) {
+      console.error('Error deleting code:', err);
+      showToast('Failed to delete code');
+    }
+  };
 
   const handleForceRefresh = async () => {
     setIsActionLoading('refresh');
@@ -341,6 +424,105 @@ export const AdminSystem: React.FC = () => {
                           Not Set
                         </span>
                       )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Section 6: Enrollment Codes */}
+      <div className="bg-surface border border-border rounded-xl p-6">
+        <h2 className="text-lg font-bold text-text-primary flex items-center gap-2 mb-4">
+          <Key className="w-5 h-5 text-primary" />
+          Enrollment Codes
+        </h2>
+        
+        <div className="bg-background border border-border rounded-xl p-4 mb-6 flex flex-col sm:flex-row gap-4">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-text-secondary mb-1">Description / Campaign</label>
+            <input 
+              type="text" 
+              value={newCodeName}
+              onChange={(e) => setNewCodeName(e.target.value)}
+              placeholder="e.g., Spring Cohort 2026"
+              className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm focus:outline-none focus:border-primary text-text-primary"
+            />
+          </div>
+          <div className="w-full sm:w-32">
+            <label className="block text-xs font-medium text-text-secondary mb-1">Max Uses</label>
+            <input 
+              type="number" 
+              min="1"
+              value={newCodeMaxUses}
+              onChange={(e) => setNewCodeMaxUses(parseInt(e.target.value) || 1)}
+              className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm focus:outline-none focus:border-primary text-text-primary"
+            />
+          </div>
+          <div className="flex items-end">
+            <button 
+              onClick={generateEnrollmentCode}
+              disabled={isGeneratingCode || !newCodeName.trim()}
+              className="w-full sm:w-auto px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isGeneratingCode ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Generate Code
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="pb-3 font-medium text-text-secondary text-sm">Code</th>
+                <th className="pb-3 font-medium text-text-secondary text-sm">Description</th>
+                <th className="pb-3 font-medium text-text-secondary text-sm">Uses</th>
+                <th className="pb-3 font-medium text-text-secondary text-sm">Created</th>
+                <th className="pb-3 font-medium text-text-secondary text-sm">Status</th>
+                <th className="pb-3 font-medium text-text-secondary text-sm text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {enrollmentCodes.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-text-secondary text-sm">
+                    No enrollment codes generated yet.
+                  </td>
+                </tr>
+              ) : (
+                enrollmentCodes.map(code => (
+                  <tr key={code.id} className="hover:bg-background/50">
+                    <td className="py-3 text-sm font-mono font-bold text-primary">{code.code}</td>
+                    <td className="py-3 text-sm text-text-primary">{code.description}</td>
+                    <td className="py-3 text-sm text-text-secondary">
+                      {code.current_uses} / {code.max_uses}
+                    </td>
+                    <td className="py-3 text-sm text-text-secondary">
+                      {new Date(code.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="py-3 text-sm">
+                      <button 
+                        onClick={() => toggleCodeStatus(code.id, code.is_active)}
+                        className={`px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+                          code.is_active 
+                            ? 'bg-green-500/10 text-green-500 hover:bg-green-500/20' 
+                            : 'bg-gray-500/10 text-gray-500 hover:bg-gray-500/20'
+                        }`}
+                      >
+                        {code.is_active ? 'Active' : 'Inactive'}
+                      </button>
+                    </td>
+                    <td className="py-3 text-sm text-right">
+                      <button 
+                        onClick={() => deleteCode(code.id)}
+                        className="p-1.5 text-text-secondary hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                        title="Delete code"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 ))

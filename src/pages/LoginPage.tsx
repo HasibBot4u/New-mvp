@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Navigate, useLocation } from 'react-router-dom';
+import { 
+  useNavigate, Navigate, useLocation 
+} from 'react-router-dom';
 import { supabase, logActivity } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
@@ -79,13 +81,16 @@ export const LoginPage: React.FC = () => {
         
         if (!profile && (!profileError || 
             profileError.code === 'PGRST116')) {
-          await supabase.from('profiles').upsert({
-            id: data.user.id,
-            email: data.user.email,
-            display_name: 
-              data.user.email?.split('@')[0] || 'User',
-            role: 'user',
-          }, { onConflict: 'id', ignoreDuplicates: true });
+          await supabase.from('profiles').upsert(
+            {
+              id: data.user.id,
+              email: data.user.email,
+              display_name:
+                data.user.email?.split('@')[0] || 'User',
+              role: 'user',
+            },
+            { onConflict: 'id', ignoreDuplicates: true }
+          );
         }
         
         if (profile?.role === 'admin') {
@@ -135,10 +140,12 @@ export const LoginPage: React.FC = () => {
 
         <form className="mt-8 space-y-6" onSubmit={handleAuth}>
           {wasBlocked && (
-            <div className="rounded-lg bg-red-50 border border-red-200
-                            p-4 text-sm text-red-700 mb-2">
-              <strong>Account blocked.</strong> Your account has been
-              blocked by an administrator.
+            <div className="rounded-lg bg-red-50 border 
+                            border-red-200 p-4 text-sm 
+                            text-red-700 mb-4">
+              <strong>Account blocked.</strong>{' '}
+              Your account has been blocked by an administrator.
+              Contact support if you believe this is a mistake.
             </div>
           )}
           {error && (

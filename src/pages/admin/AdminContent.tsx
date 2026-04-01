@@ -7,17 +7,39 @@ import { Plus, Edit2, Trash2, Search, Upload, PlayCircle, CheckCircle, XCircle }
 import { Badge } from '../../components/ui/Badge';
 import { useToast } from '../../components/ui/Toast';
 import { getWorkingBackend } from '../../lib/api';
+import { AdminQuizQuestions } from '../../components/admin/AdminQuizQuestions';
 
 export const AdminContent: React.FC = () => {
   const { catalog, isLoading, refreshCatalog } = useCatalog();
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<'subjects' | 'cycles' | 'chapters' | 'videos'>('subjects');
+  const [activeTab, setActiveTab] = useState<'subjects' | 'cycles' | 'chapters' | 'videos' | 'quizzes'>('subjects');
   const [searchQuery, setSearchQuery] = useState('');
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any>(null);
   const [formData, setFormData] = useState<any>({});
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Quizzes State
+  const [quizzes, setQuizzes] = useState<any[]>([]);
+  const [isLoadingQuizzes, setIsLoadingQuizzes] = useState(false);
+
+  React.useEffect(() => {
+    fetchQuizzes();
+  }, []);
+
+  const fetchQuizzes = async () => {
+    setIsLoadingQuizzes(true);
+    try {
+      const { data, error } = await supabase.from('quizzes').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      setQuizzes(data || []);
+    } catch (err) {
+      console.error('Error fetching quizzes:', err);
+    } finally {
+      setIsLoadingQuizzes(false);
+    }
+  };
   
   // Bulk Import State
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -27,6 +49,9 @@ export const AdminContent: React.FC = () => {
   
   // Stream Test State
   const [streamTestResult, setStreamTestResult] = useState<{status: 'success' | 'error' | 'testing' | null, message: string}>({status: null, message: ''});
+
+  // Manage Questions State
+  const [managingQuiz, setManagingQuiz] = useState<{id: string, title: string} | null>(null);
 
   if (isLoading) {
     return (
@@ -63,11 +88,16 @@ export const AdminContent: React.FC = () => {
     v.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const filteredQuizzes = quizzes.filter(q => 
+    q.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   const tabs = [
     { id: 'subjects', label: 'Subjects', count: filteredSubjects.length },
     { id: 'cycles', label: 'Cycles', count: filteredCycles.length },
     { id: 'chapters', label: 'Chapters', count: filteredChapters.length },
     { id: 'videos', label: 'Videos', count: filteredVideos.length },
+    { id: 'quizzes', label: 'Quizzes', count: filteredQuizzes.length },
   ];
 
   const handleEdit = (item: any) => {
@@ -114,7 +144,11 @@ export const AdminContent: React.FC = () => {
       }
       
       setIsModalOpen(false);
-      await refreshCatalog();
+      if (activeTab === 'quizzes') {
+        await fetchQuizzes();
+      } else {
+        await refreshCatalog();
+      }
       showToast(`${activeTab.slice(0, -1)} saved successfully`);
     } catch (error) {
       console.error(`Error saving ${activeTab}:`, error);
@@ -131,7 +165,11 @@ export const AdminContent: React.FC = () => {
       const { error } = await supabase.from(table).delete().eq('id', id);
       if (error) throw error;
       
-      await refreshCatalog();
+      if (table === 'quizzes') {
+        await fetchQuizzes();
+      } else {
+        await refreshCatalog();
+      }
       showToast(`${table.slice(0, -1)} deleted successfully`);
     } catch (error) {
       console.error(`Error deleting from ${table}:`, error);
@@ -148,6 +186,18 @@ export const AdminContent: React.FC = () => {
     } catch (error) {
       console.error('Error toggling video status:', error);
       showToast('Failed to update video status');
+    }
+  };
+
+  const toggleQuizPublished = async (id: string, currentStatus: boolean) => {
+    try {
+      const { error } = await supabase.from('quizzes').update({ is_published: !currentStatus }).eq('id', id);
+      if (error) throw error;
+      await fetchQuizzes();
+      showToast(`Quiz ${!currentStatus ? 'published' : 'unpublished'}`);
+    } catch (error) {
+      console.error('Error toggling quiz status:', error);
+      showToast('Failed to update quiz status');
     }
   };
 
@@ -319,6 +369,63 @@ export const AdminContent: React.FC = () => {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        );
+      case 'quizzes':
+        return (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm text-text-secondary whitespace-nowrap">
+              <thead className="bg-surface text-xs uppercase text-text-primary border-b border-border">
+                <tr>
+                  <th className="px-6 py-3">Title</th>
+                  <th className="px-6 py-3">Chapter</th>
+                  <th className="px-6 py-3">Time Limit</th>
+                  <th className="px-6 py-3">Marks</th>
+                  <th className="px-6 py-3">Published</th>
+                  <th className="px-6 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isLoadingQuizzes ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-8 text-center">Loading quizzes...</td>
+                  </tr>
+                ) : filteredQuizzes.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-8 text-center">No quizzes found</td>
+                  </tr>
+                ) : (
+                  filteredQuizzes.map((quiz) => {
+                    const chapter = allChapters.find(c => c.id === quiz.chapter_id);
+                    return (
+                      <tr key={quiz.id} className="border-b border-border hover:bg-surface/50">
+                        <td className="px-6 py-4 font-medium text-text-primary truncate max-w-[200px]" title={quiz.title}>{quiz.title}</td>
+                        <td className="px-6 py-4"><Badge variant="outline">{chapter?.name || 'Unknown Chapter'}</Badge></td>
+                        <td className="px-6 py-4">{quiz.time_limit_minutes} mins</td>
+                        <td className="px-6 py-4">{quiz.pass_marks} / {quiz.total_marks}</td>
+                        <td className="px-6 py-4">
+                          <button
+                            onClick={() => toggleQuizPublished(quiz.id, quiz.is_published)}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${quiz.is_published ? 'bg-green-500' : 'bg-gray-600'}`}
+                          >
+                            <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${quiz.is_published ? 'translate-x-5' : 'translate-x-1'}`} />
+                          </button>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => setManagingQuiz({id: quiz.id, title: quiz.title})}>
+                              Questions
+                            </Button>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleEdit(quiz)}><Edit2 size={14} /></Button>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-500 hover:text-red-600" onClick={() => handleDelete('quizzes', quiz.id)}><Trash2 size={14} /></Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -609,6 +716,79 @@ export const AdminContent: React.FC = () => {
             </>
           )}
 
+          {activeTab === 'quizzes' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-1">Title</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.title || ''}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-1">Chapter</label>
+                <select
+                  required
+                  value={formData.chapter_id || ''}
+                  onChange={(e) => setFormData({ ...formData, chapter_id: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Select Chapter</option>
+                  {allChapters.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-text-primary mb-1">Time Limit (mins)</label>
+                  <input
+                    type="number"
+                    required
+                    value={formData.time_limit_minutes || 15}
+                    onChange={(e) => setFormData({ ...formData, time_limit_minutes: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-primary mb-1">Total Marks</label>
+                  <input
+                    type="number"
+                    required
+                    value={formData.total_marks || 100}
+                    onChange={(e) => setFormData({ ...formData, total_marks: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-text-primary mb-1">Pass Marks</label>
+                  <input
+                    type="number"
+                    required
+                    value={formData.pass_marks || 50}
+                    onChange={(e) => setFormData({ ...formData, pass_marks: parseInt(e.target.value) || 0 })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-4">
+                <input
+                  type="checkbox"
+                  id="is_published"
+                  checked={formData.is_published || false}
+                  onChange={(e) => setFormData({ ...formData, is_published: e.target.checked })}
+                  className="rounded border-border text-primary focus:ring-primary"
+                />
+                <label htmlFor="is_published" className="text-sm font-medium text-text-primary">
+                  Published (visible to students)
+                </label>
+              </div>
+            </>
+          )}
+
           <div className="flex justify-end gap-3 pt-4 border-t border-border mt-6">
             <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
               Cancel
@@ -788,6 +968,15 @@ export const AdminContent: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* Manage Questions Modal */}
+      {managingQuiz && (
+        <AdminQuizQuestions
+          quizId={managingQuiz.id}
+          quizTitle={managingQuiz.title}
+          onClose={() => setManagingQuiz(null)}
+        />
       )}
     </div>
   );

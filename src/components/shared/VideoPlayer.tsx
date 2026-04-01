@@ -7,10 +7,13 @@ import { saveProgress } from '../../lib/supabase';
 
 interface VideoPlayerProps {
   videoId: string;
+  sizeMb?: number;
+  isTheaterMode?: boolean;
+  onToggleTheaterMode?: () => void;
   onComplete?: () => void;
 }
 
-export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
+export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheaterMode, onComplete }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -35,10 +38,15 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   const [errorMessage, setErrorMessage] = useState('');
   const [isStarting, setIsStarting] = useState(false);
   const [chapters, setChapters] = useState<{ title: string; time: number; percent: number }[]>([]);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [resumeTime, setResumeTime] = useState(0);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [targetStartTime, setTargetStartTime] = useState(0);
 
-  const startVideo = async () => {
+  const startVideo = async (startTime: number = 0) => {
     if (!videoRef.current) return;
     
+    setTargetStartTime(startTime);
     setHasStarted(true);
     setIsStarting(true);
     setHasError(false);
@@ -157,6 +165,9 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
 
     // Start playing when enough data arrives
     const onCanPlay = () => {
+      if (targetStartTime > 0 && video.currentTime === 0) {
+        video.currentTime = targetStartTime;
+      }
       const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
@@ -208,9 +219,12 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
     }
 
     const savedProgress = getProgress(videoId);
-    if (savedProgress > 10 && videoRef.current) {
-      // We will seek once duration is known to ensure it's < 95%
+    if (savedProgress > 10) {
+      setResumeTime(savedProgress);
+    } else {
+      setResumeTime(0);
     }
+    setShowResumePrompt(false);
   }, [videoId]);
 
   const formatTime = (time: number) => {
@@ -319,13 +333,23 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
   };
 
   const togglePiP = async () => {
-    if (!hasStarted) return;
-    if (videoRef.current && document.pictureInPictureEnabled) {
-      if (document.pictureInPictureElement) {
-        await document.exitPictureInPicture();
-      } else {
-        await videoRef.current.requestPictureInPicture();
+    if (!hasStarted || !videoRef.current) return;
+    
+    try {
+      if (document.pictureInPictureEnabled) {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          if (videoRef.current.readyState >= 1) {
+            await videoRef.current.requestPictureInPicture();
+          } else {
+            showToast("Please wait for video to load");
+          }
+        }
       }
+    } catch (error) {
+      console.error("PiP error:", error);
+      showToast("Picture-in-Picture not available");
     }
   };
 
@@ -377,6 +401,19 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
         case 'f':
           e.preventDefault();
           toggleFullscreen();
+          break;
+        case '?':
+          e.preventDefault();
+          setShowShortcuts(prev => !prev);
+          break;
+        case '1': case '2': case '3': case '4': case '5': 
+        case '6': case '7': case '8': case '9':
+          e.preventDefault();
+          if (videoRef.current && duration > 0) {
+            const percent = parseInt(e.key) * 10;
+            videoRef.current.currentTime = (percent / 100) * duration;
+            showVideoToast(`${percent}%`);
+          }
           break;
       }
     };
@@ -482,13 +519,6 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
     if (!videoRef.current) return;
     const dur = videoRef.current.duration;
     setDuration(dur);
-
-    // Resume playback logic
-    const savedProgress = getProgress(videoId);
-    if (savedProgress > 10 && savedProgress < dur * 0.95) {
-      videoRef.current.currentTime = savedProgress;
-      showToast(`Resumed from ${formatTime(savedProgress)}`);
-    }
   };
 
   return (
@@ -544,8 +574,7 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
       {!hasStarted && !hasError && (
         <div
           className="absolute inset-0 bg-black flex flex-col 
-                     items-center justify-center cursor-pointer z-20"
-          onClick={!isStarting ? startVideo : undefined}
+                     items-center justify-center z-20"
         >
           {isStarting ? (
             <div className="flex flex-col items-center space-y-4">
@@ -558,20 +587,58 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
                 Connecting to server and warming cache
               </p>
             </div>
+          ) : showResumePrompt ? (
+            <div className="flex flex-col items-center bg-gray-900/90 p-8 rounded-2xl backdrop-blur-md border border-white/10 shadow-2xl">
+              <p className="text-white font-semibold text-xl mb-6">
+                Resume from {formatTime(resumeTime)}?
+              </p>
+              <div className="flex space-x-4">
+                <button 
+                  onClick={() => {
+                    setShowResumePrompt(false);
+                    startVideo(resumeTime);
+                  }}
+                  className="px-8 py-3 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90 transition-all active:scale-95"
+                >
+                  Yes, Resume
+                </button>
+                <button 
+                  onClick={() => {
+                    setShowResumePrompt(false);
+                    startVideo(0);
+                  }}
+                  className="px-8 py-3 bg-white/10 text-white rounded-xl font-semibold hover:bg-white/20 transition-all active:scale-95"
+                >
+                  Start Over
+                </button>
+              </div>
+            </div>
           ) : (
-            <div className="flex flex-col items-center">
+            <div 
+              className="flex flex-col items-center cursor-pointer group"
+              onClick={() => {
+                if (resumeTime > 0) {
+                  setShowResumePrompt(true);
+                } else {
+                  startVideo(0);
+                }
+              }}
+            >
               <div className="w-20 h-20 bg-white/10 border-2 border-white/20
                               rounded-full flex items-center justify-center 
-                              mb-4 hover:bg-white/20 hover:scale-105 
+                              mb-4 group-hover:bg-white/20 group-hover:scale-105 
                               transition-all duration-200">
                 <Play className="w-9 h-9 text-white ml-1" fill="currentColor" />
               </div>
-              <p className="text-white font-semibold text-base mb-1">
+              <p className="text-white font-semibold text-base mb-2">
                 Tap to Play
               </p>
-              <p className="text-white/40 text-xs">
-                Video will start in 1–2 seconds
-              </p>
+              {sizeMb > 0 && (
+                <div className="flex flex-col items-center text-white/50 text-xs space-y-1">
+                  <span>File size: {sizeMb.toFixed(1)} MB</span>
+                  <span>Est. load time: {Math.ceil((sizeMb * 8) / 2 / 60)} min (at 2Mbps)</span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -726,17 +793,46 @@ export function VideoPlayer({ videoId, onComplete }: VideoPlayerProps) {
             </div>
 
             {document.pictureInPictureEnabled && (
-              <button onClick={togglePiP} className="hover:text-primary transition-colors">
+              <button onClick={togglePiP} className="hover:text-primary transition-colors" title="Picture in Picture">
                 <PictureInPicture className="w-5 h-5" />
               </button>
             )}
             
-            <button onClick={toggleFullscreen} className="hover:text-primary transition-colors">
+            {onToggleTheaterMode && (
+              <button onClick={onToggleTheaterMode} className="hover:text-primary transition-colors hidden md:block" title="Theater Mode">
+                <div className="w-5 h-4 border-2 border-current rounded-sm flex items-center justify-center">
+                  <div className={`h-full bg-current transition-all ${isTheaterMode ? 'w-full' : 'w-2/3'}`} />
+                </div>
+              </button>
+            )}
+
+            <button onClick={toggleFullscreen} className="hover:text-primary transition-colors" title="Fullscreen (f)">
               {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Keyboard Shortcuts Overlay */}
+      {showShortcuts && (
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center" onClick={() => setShowShortcuts(false)}>
+          <div className="bg-gray-900 border border-white/10 rounded-xl p-6 max-w-md w-full shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-white font-bold text-lg">Keyboard Shortcuts</h3>
+              <button onClick={() => setShowShortcuts(false)} className="text-gray-400 hover:text-white">✕</button>
+            </div>
+            <div className="grid grid-cols-2 gap-y-3 gap-x-6 text-sm">
+              <div className="flex justify-between text-gray-300"><span className="font-mono bg-white/10 px-1.5 rounded text-white">Space</span> <span>Play / Pause</span></div>
+              <div className="flex justify-between text-gray-300"><span className="font-mono bg-white/10 px-1.5 rounded text-white">F</span> <span>Fullscreen</span></div>
+              <div className="flex justify-between text-gray-300"><span className="font-mono bg-white/10 px-1.5 rounded text-white">M</span> <span>Mute</span></div>
+              <div className="flex justify-between text-gray-300"><span className="font-mono bg-white/10 px-1.5 rounded text-white">← / →</span> <span>Seek ±10s</span></div>
+              <div className="flex justify-between text-gray-300"><span className="font-mono bg-white/10 px-1.5 rounded text-white">↑ / ↓</span> <span>Volume</span></div>
+              <div className="flex justify-between text-gray-300"><span className="font-mono bg-white/10 px-1.5 rounded text-white">1-9</span> <span>Jump to 10-90%</span></div>
+              <div className="flex justify-between text-gray-300"><span className="font-mono bg-white/10 px-1.5 rounded text-white">?</span> <span>Show shortcuts</span></div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

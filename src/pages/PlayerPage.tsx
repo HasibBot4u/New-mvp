@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, CheckCircle, PlayCircle, FileText, ListVideo, Info } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { useCatalog } from '../contexts/CatalogContext';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import { VideoPlayer } from '../components/shared/VideoPlayer';
 import { useVideoProgress } from '../hooks/useVideoProgress';
 import { Breadcrumb } from '../components/ui/Breadcrumb';
@@ -11,11 +14,14 @@ export function PlayerPage() {
   const { videoId } = useParams<{ videoId: string }>();
   const navigate = useNavigate();
   const { catalog, isLoading } = useCatalog();
+  const { user, profile } = useAuth();
   const { isCompleted, setCompleted, getNotes, setNotes } = useVideoProgress();
   
   const [activeTab, setActiveTab] = useState<'about' | 'notes' | 'list'>('about');
   const [notesText, setNotesText] = useState('');
   const [visible, setVisible] = useState(false);
+  const [showCertificate, setShowCertificate] = useState(false);
+  const [isTheaterMode, setIsTheaterMode] = useState(false);
 
   useEffect(() => {
     setVisible(true);
@@ -90,6 +96,40 @@ export function PlayerPage() {
   const { subject, cycle, chapter, video, allVideos, prevVideo, nextVideo } = videoContext;
   const completed = isCompleted(video.id);
 
+  const handleComplete = async (vid: string, isChecked: boolean) => {
+    setCompleted(vid, isChecked);
+    if (isChecked && videoContext) {
+      let allCompleted = true;
+      for (const ch of cycle.chapters) {
+        for (const v of ch.videos) {
+          if (!isCompleted(v.id) && v.id !== vid) {
+            allCompleted = false;
+            break;
+          }
+        }
+        if (!allCompleted) break;
+      }
+      if (allCompleted) {
+        setShowCertificate(true);
+        confetti({
+          particleCount: 150,
+          spread: 80,
+          origin: { y: 0.6 }
+        });
+        if (user) {
+          try {
+            await supabase.from('cycle_completions').upsert({
+              user_id: user.id,
+              cycle_id: cycle.id
+            }, { onConflict: 'user_id, cycle_id' });
+          } catch (e) {
+            console.error('Error saving cycle completion:', e);
+          }
+        }
+      }
+    }
+  };
+
   return (
     <div className={`min-h-screen bg-gray-50 pb-20 transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}>
       {/* Topbar */}
@@ -105,12 +145,18 @@ export function PlayerPage() {
 
       {/* Video Player Area */}
       <div className="w-full bg-black">
-        <div className="max-w-6xl mx-auto">
-          <VideoPlayer videoId={video.id} onComplete={() => setCompleted(video.id, true)} />
+        <div className={`mx-auto transition-all duration-300 ${isTheaterMode ? 'w-full max-w-none' : 'max-w-6xl'}`}>
+          <VideoPlayer 
+            videoId={video.id} 
+            sizeMb={video.size_mb}
+            isTheaterMode={isTheaterMode}
+            onToggleTheaterMode={() => setIsTheaterMode(!isTheaterMode)}
+            onComplete={() => handleComplete(video.id, true)} 
+          />
         </div>
       </div>
 
-      <main className="max-w-4xl mx-auto px-4 py-6">
+      <main className={`mx-auto px-4 py-6 transition-all duration-300 ${isTheaterMode ? 'max-w-6xl' : 'max-w-4xl'}`}>
         <Breadcrumb items={[
           { label: 'Home', href: '/' },
           { label: subject.name, href: `/subject/${subject.id}` },
@@ -128,7 +174,7 @@ export function PlayerPage() {
             <input 
               type="checkbox" 
               checked={completed}
-              onChange={(e) => setCompleted(video.id, e.target.checked)}
+              onChange={(e) => handleComplete(video.id, e.target.checked)}
               className="w-5 h-5 rounded text-primary focus:ring-primary border-gray-300"
             />
             <span className={`font-medium ${completed ? 'text-success' : 'text-gray-700'}`}>
@@ -198,12 +244,30 @@ export function PlayerPage() {
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <h3 className="text-lg font-semibold text-gray-900">Personal Notes</h3>
-                <button 
-                  onClick={clearNotes}
-                  className="text-sm text-red-600 hover:text-red-700 font-medium"
-                >
-                  Clear Notes
-                </button>
+                <div className="flex space-x-4">
+                  <button 
+                    onClick={() => {
+                      import('jspdf').then(({ jsPDF }) => {
+                        const doc = new jsPDF();
+                        doc.setFontSize(20);
+                        doc.text(`Notes: ${video.title}`, 20, 20);
+                        doc.setFontSize(12);
+                        const splitText = doc.splitTextToSize(notesText, 170);
+                        doc.text(splitText, 20, 30);
+                        doc.save(`${video.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_notes.pdf`);
+                      });
+                    }}
+                    className="text-sm text-primary hover:text-primary/80 font-medium"
+                  >
+                    Export PDF
+                  </button>
+                  <button 
+                    onClick={clearNotes}
+                    className="text-sm text-red-600 hover:text-red-700 font-medium"
+                  >
+                    Clear Notes
+                  </button>
+                </div>
               </div>
               <textarea
                 value={notesText}
@@ -276,6 +340,43 @@ export function PlayerPage() {
           </button>
         </div>
       </main>
+
+      {/* Certificate Modal */}
+      {showCertificate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-8 text-center relative overflow-hidden shadow-2xl animate-in zoom-in duration-300">
+            <button 
+              onClick={() => setShowCertificate(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle className="w-10 h-10 text-green-600" />
+            </div>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Congratulations!</h2>
+            <p className="text-gray-600 mb-8">You have successfully completed all videos in this cycle.</p>
+            
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 mb-8 relative">
+              <div className="absolute top-0 right-0 w-16 h-16 bg-yellow-100 rounded-bl-full flex items-start justify-end p-3">
+                <span className="text-2xl">🏆</span>
+              </div>
+              <p className="text-sm text-gray-500 uppercase tracking-wider font-semibold mb-1">Certificate of Completion</p>
+              <h3 className="text-xl font-bold text-gray-900 mb-4">{cycle.name}</h3>
+              <p className="text-gray-600 mb-2 text-left">Subject: <span className="font-medium text-gray-900">{subject.name}</span></p>
+              <p className="text-gray-600 mb-2 text-left">Student: <span className="font-medium text-gray-900">{profile?.display_name || user?.email}</span></p>
+              <p className="text-gray-600 text-left">Date: <span className="font-medium text-gray-900">{new Date().toLocaleDateString()}</span></p>
+            </div>
+            
+            <button 
+              onClick={() => setShowCertificate(false)}
+              className="w-full py-3 bg-primary text-white rounded-xl font-semibold hover:bg-primary/90 transition-colors"
+            >
+              Continue Learning
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

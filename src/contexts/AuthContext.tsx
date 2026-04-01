@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { 
+  createContext, useContext, useEffect, useState, useRef 
+} from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { Profile } from '../types';
@@ -12,131 +14,197 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType | undefined>(
+  undefined
+);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> 
-  = ({ children }) => {
+const PROFILE_CACHE_KEY = 'nexusedu_profile_cache';
+const SESSION_CACHE_KEY = 'nexusedu_session_cache';
+
+function getCachedProfile(): Profile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedProfile(p: Profile | null) {
+  try {
+    if (p) {
+      localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(p));
+    } else {
+      localStorage.removeItem(PROFILE_CACHE_KEY);
+    }
+  } catch {}
+}
+
+export const AuthProvider: React.FC<{ 
+  children: React.ReactNode 
+}> = ({ children }) => {
+  // Start with cached profile so UI renders immediately
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(
+    getCachedProfile()
+  );
+  // Start loading as FALSE if we have a cached profile
+  // so the app renders immediately from cache
+  const [isLoading, setIsLoading] = useState(
+    getCachedProfile() === null
+  );
+  const mountedRef = useRef(true);
 
-  const fetchProfile = async (userId: string) => {
-    // Retry up to 3 times with 2 second gaps
-    // This handles Supabase cold starts gracefully
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId)
-          .single();
-        if (error) {
-          console.error(
-            `Profile fetch attempt ${attempt} failed:`, error
-          );
-          if (attempt < 3) {
-            await new Promise(r => setTimeout(r, 2000));
-            continue;
-          }
-        } else if (data) {
-          setProfile(data as Profile);
-          return;
-        }
-      } catch (e) {
-        console.error(`Profile fetch attempt ${attempt} exception:`, e);
-        if (attempt < 3) {
-          await new Promise(r => setTimeout(r, 2000));
-        }
+  const fetchProfileOnce = async (
+    userId: string
+  ): Promise<Profile | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      if (error) {
+        console.error('fetchProfile error:', error.message);
+        return null;
       }
-    }
-    // All 3 attempts failed
-    // Try to read from localStorage cache as last resort
-    const cached = localStorage.getItem('nexusedu_profile_cache');
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        setProfile(parsed as Profile);
-        console.warn('Using cached profile due to Supabase error');
-      } catch (e) {
-        console.error('Failed to parse cached profile');
-      }
+      return data as Profile;
+    } catch (e) {
+      console.error('fetchProfile exception:', e);
+      return null;
     }
   };
 
   const refreshProfile = async () => {
-    if (!user) return;
-    await fetchProfile(user.id);
+    if (!mountedRef.current) return;
+    const currentUser = user;
+    if (!currentUser) return;
+    const fresh = await fetchProfileOnce(currentUser.id);
+    if (fresh && mountedRef.current) {
+      setProfile(fresh);
+      setCachedProfile(fresh);
+    }
   };
 
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
+
+    // Hard timeout — no matter what happens,
+    // isLoading becomes false after 5 seconds maximum
+    const hardTimeout = setTimeout(() => {
+      if (mountedRef.current) {
+        console.warn('Auth hard timeout — forcing isLoading=false');
+        setIsLoading(false);
+      }
+    }, 5000);
 
     const initAuth = async () => {
       try {
-        const { data: { session } } = 
+        // This gets the session from localStorage — very fast
+        // (does NOT make a network request on most browsers)
+        const { data: { session }, error } =
           await supabase.auth.getSession();
-        if (!mounted) return;
+
+        if (!mountedRef.current) return;
+
+        if (error) {
+          console.error('getSession error:', error.message);
+          clearTimeout(hardTimeout);
+          setIsLoading(false);
+          return;
+        }
+
         setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchProfile(session.user.id);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+
+        if (currentUser) {
+          // Try to fetch fresh profile
+          // but do NOT block the loading state on it
+          fetchProfileOnce(currentUser.id).then(fresh => {
+            if (fresh && mountedRef.current) {
+              setProfile(fresh);
+              setCachedProfile(fresh);
+            }
+          });
+        } else {
+          // No session — clear cache
+          setCachedProfile(null);
+          setProfile(null);
         }
       } catch (e) {
-        console.error('Auth init error:', e);
+        console.error('initAuth exception:', e);
       } finally {
-        if (mounted) setIsLoading(false);
+        clearTimeout(hardTimeout);
+        if (mountedRef.current) setIsLoading(false);
       }
     };
 
-    // No artificial timeout — let it wait properly
     initAuth();
 
     const { data: { subscription } } =
-      supabase.auth.onAuthStateChange(async (_event, session) => {
-        if (!mounted) return;
-        setSession(session);
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          await fetchProfile(session.user.id);
-        } else {
-          setProfile(null);
-          localStorage.removeItem('nexusedu_profile_cache');
+      supabase.auth.onAuthStateChange(
+        async (_event, newSession) => {
+          if (!mountedRef.current) return;
+
+          setSession(newSession);
+          const newUser = newSession?.user ?? null;
+          setUser(newUser);
+
+          if (newUser) {
+            fetchProfileOnce(newUser.id).then(fresh => {
+              if (fresh && mountedRef.current) {
+                setProfile(fresh);
+                setCachedProfile(fresh);
+              }
+            });
+          } else {
+            setProfile(null);
+            setCachedProfile(null);
+          }
+
+          setIsLoading(false);
         }
-        setIsLoading(false);
-      });
+      );
 
     return () => {
-      mounted = false;
+      mountedRef.current = false;
+      clearTimeout(hardTimeout);
       subscription.unsubscribe();
     };
   }, []);
 
-  // Cache the profile whenever it changes
-  useEffect(() => {
-    if (profile) {
-      localStorage.setItem(
-        'nexusedu_profile_cache', 
-        JSON.stringify(profile)
-      );
-    }
-  }, [profile]);
-
   const signOut = async () => {
     try {
-      localStorage.removeItem('nexusedu_profile_cache');
-      await supabase.auth.signOut();
+      setCachedProfile(null);
+      localStorage.removeItem(SESSION_CACHE_KEY);
+      await Promise.race([
+        supabase.auth.signOut(),
+        // If signOut hangs for 5 seconds, force it
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('signOut timeout')), 5000)
+        )
+      ]);
     } catch (e) {
-      console.error('Sign out error:', e);
-      // Force sign out even if Supabase is unreachable
-      localStorage.clear();
-      window.location.href = '/login';
+      console.warn('signOut issue (forcing anyway):', e);
+    } finally {
+      // Always clear state regardless of Supabase response
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      setCachedProfile(null);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      session, user, profile, isLoading, signOut, refreshProfile 
+    <AuthContext.Provider value={{
+      session,
+      user,
+      profile,
+      isLoading,
+      signOut,
+      refreshProfile,
     }}>
       {children}
     </AuthContext.Provider>
@@ -144,9 +212,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }>
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth must be used within AuthProvider');
   }
-  return context;
+  return ctx;
 };

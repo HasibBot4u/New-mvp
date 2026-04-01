@@ -13,6 +13,8 @@ import { VideoListPage } from './pages/VideoListPage';
 import { PlayerPage } from './pages/PlayerPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { ProgressPage } from './pages/ProgressPage';
+import { NotesPage } from './pages/NotesPage';
 import { AdminLayout } from './pages/admin/AdminLayout';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminContent } from './pages/admin/AdminContent';
@@ -21,31 +23,39 @@ import { AdminLogs } from './pages/admin/AdminLogs';
 
 import { AdminSystem } from './pages/admin/AdminSystem';
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> =
-  ({ children }) => {
-    const { user, profile, isLoading } = useAuth();
+const ProtectedRoute: React.FC<{ 
+  children: React.ReactNode 
+}> = ({ children }) => {
+  const { user, profile, isLoading } = useAuth();
 
-    if (isLoading) {
-      return (
-        <div className="flex h-screen items-center justify-center
-                        bg-gray-50">
-          <div className="w-10 h-10 border-4 border-primary/30
-                          border-t-primary rounded-full
-                          animate-spin" />
-        </div>
-      );
-    }
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center 
+                      bg-gray-50 flex-col gap-4">
+        <div className="w-12 h-12 border-4 border-primary/20 
+                        border-t-primary rounded-full 
+                        animate-spin" />
+        <p className="text-gray-500 text-sm">Loading NexusEdu...</p>
+      </div>
+    );
+  }
 
-    if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
-    if (profile?.is_blocked === true) {
-      return <Navigate to="/login"
-                       state={{ blocked: true }}
-                       replace />;
-    }
+  if (profile?.is_blocked === true) {
+    return (
+      <Navigate
+        to="/login"
+        state={{ blocked: true }}
+        replace
+      />
+    );
+  }
 
-    return <>{children}</>;
-  };
+  return <>{children}</>;
+};
 
 const AppContent: React.FC = () => {
   return (
@@ -62,6 +72,8 @@ const AppContent: React.FC = () => {
           <Route path="/chapter/:chapterId" element={<ProtectedRoute><VideoListPage /></ProtectedRoute>} />
           <Route path="/watch/:videoId" element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          <Route path="/progress" element={<ProtectedRoute><ProgressPage /></ProtectedRoute>} />
+          <Route path="/notes" element={<ProtectedRoute><NotesPage /></ProtectedRoute>} />
 
           <Route path="/admin" element={<ProtectedRoute><AdminLayout /></ProtectedRoute>}>
             <Route index element={<AdminDashboard />} />
