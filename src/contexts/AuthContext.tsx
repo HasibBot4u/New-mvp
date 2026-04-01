@@ -53,12 +53,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('Error fetching profile:', error);
-      } else {
+      } else if (data) {
         setProfile(data as Profile);
+      } else {
+        setProfile(null);
       }
     } catch (error) {
       console.error('Error in fetchProfile:', error);
@@ -68,21 +70,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshProfile = async () => {
-    const currentUser = user;
-    if (!currentUser) return;
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', currentUser.id)
-        .single();
-      if (error) {
-        console.error('Error fetching profile:', error);
-        return;
-      }
-      if (data) setProfile(data as Profile);
-    } catch (e) {
-      console.error('refreshProfile exception:', e);
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+    if (!error && data) {
+      setProfile(data as Profile);
     }
   };
 

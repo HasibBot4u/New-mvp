@@ -21,24 +21,27 @@ import { AdminLogs } from './pages/admin/AdminLogs';
 
 import { AdminSystem } from './pages/admin/AdminSystem';
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = 
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> =
   ({ children }) => {
     const { user, profile, isLoading } = useAuth();
 
     if (isLoading) {
       return (
-        <div className="flex h-screen items-center justify-center 
+        <div className="flex h-screen items-center justify-center
                         bg-gray-50">
-          <div className="w-10 h-10 border-4 border-primary/30 
-                          border-t-primary rounded-full animate-spin" />
+          <div className="w-10 h-10 border-4 border-primary/30
+                          border-t-primary rounded-full
+                          animate-spin" />
         </div>
       );
     }
 
     if (!user) return <Navigate to="/login" replace />;
 
-    if (profile?.is_blocked) {
-      return <Navigate to="/login" state={{ blocked: true }} replace />;
+    if (profile?.is_blocked === true) {
+      return <Navigate to="/login"
+                       state={{ blocked: true }}
+                       replace />;
     }
 
     return <>{children}</>;

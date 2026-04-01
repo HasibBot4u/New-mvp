@@ -16,11 +16,12 @@ export function ProfilePage() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    refreshProfile().then(() => {
+    const init = async () => {
+      await refreshProfile();
       setStats(getStats());
       setVisible(true);
-    });
-    setVisible(true);
+    };
+    init();
   }, []);
 
   const handleSignOut = async () => {
@@ -96,8 +97,8 @@ export function ProfilePage() {
           {profile?.role === 'admin' && (
             <button
               onClick={() => navigate('/admin')}
-              className="w-full flex items-center justify-between p-4 
-                         hover:bg-amber-50 transition-colors border-b 
+              className="w-full flex items-center justify-between p-4
+                         hover:bg-amber-50 transition-colors border-b
                          border-gray-100"
             >
               <div className="flex items-center space-x-3 text-amber-700">

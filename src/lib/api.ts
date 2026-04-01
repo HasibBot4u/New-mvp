@@ -4,7 +4,7 @@ const PRIMARY_BACKEND = 'https://nexusedu-backend-0bjq.onrender.com';
 const SECONDARY_BACKEND = 'https://edbe7e18-233b-4ff5-bed9-83c4e0edd51e-00-25a1ryv2rxe0o.sisko.replit.dev';
 
 // Helper to get the currently working backend
-async function getWorkingBackend(): Promise<string> {
+export async function getWorkingBackend(): Promise<string> {
   // Check if we have a cached working backend
   const cachedBackend = localStorage.getItem('working_backend');
   if (cachedBackend) {

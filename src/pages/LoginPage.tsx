@@ -69,30 +69,31 @@ export const LoginPage: React.FC = () => {
           .from('profiles')
           .select('role')
           .eq('id', data.user.id)
-          .single();
+          .maybeSingle();
         
-        if (profileError && profileError.code !== 'PGRST116') {
-          // PGRST116 is "No rows found". Any other error is a real error.
+        if (profileError) {
           console.error('Error fetching profile:', profileError);
           // If it's a recursion error or something else, we still log them in as a regular user
           // to prevent them from being completely stuck, but we log the error.
         }
         
-        if (!profile && (!profileError || profileError.code === 'PGRST116')) {
+        if (!profile && !profileError) {
           // Profile doesn't exist yet, create it
-          const { error: insertError } = await supabase.from('profiles').insert({
-            id: data.user.id,
-            email: data.user.email,
-            display_name: data.user.email?.split('@')[0] || 'User',
-            role: 'user',
-          });
+          const { error: insertError } = await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              email: data.user.email,
+              display_name: data.user.email?.split('@')[0] || 'User',
+              role: 'user',
+            }, { onConflict: 'id', ignoreDuplicates: true });
           if (insertError) {
-             console.error('Error creating profile:', insertError);
+            console.error('Error creating profile:', insertError);
           }
         }
         
         if (profile?.role === 'admin') {
-          navigate('/admin/dashboard');
+          navigate('/admin');
         } else {
           navigate('/');
         }
@@ -123,13 +124,6 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-4 py-12 sm:px-6 lg:px-8 flex-col">
-      {wasBlocked && (
-        <div className="rounded-lg bg-red-50 border border-red-200 
-                        p-4 text-sm text-red-700">
-          <strong>Account blocked.</strong> Your account has been blocked 
-          by an administrator. Contact support if this is a mistake.
-        </div>
-      )}
       <div className="w-full max-w-md space-y-8 rounded-2xl border border-border bg-surface p-8 shadow-sm">
         <div className="text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-2xl font-bold text-white">
@@ -144,6 +138,13 @@ export const LoginPage: React.FC = () => {
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleAuth}>
+          {wasBlocked && (
+            <div className="rounded-lg bg-red-50 border border-red-200
+                            p-4 text-sm text-red-700 mb-2">
+              <strong>Account blocked.</strong> Your account has been
+              blocked by an administrator.
+            </div>
+          )}
           {error && (
             <div className="rounded-md bg-red-50 p-4 text-sm text-red-700 border border-red-200">
               {error}

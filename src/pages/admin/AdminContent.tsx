@@ -6,6 +6,7 @@ import { Modal } from '../../components/ui/Modal';
 import { Plus, Edit2, Trash2, Search, Upload, PlayCircle, CheckCircle, XCircle } from 'lucide-react';
 import { Badge } from '../../components/ui/Badge';
 import { useToast } from '../../components/ui/Toast';
+import { getWorkingBackend } from '../../lib/api';
 
 export const AdminContent: React.FC = () => {
   const { catalog, isLoading, refreshCatalog } = useCatalog();
@@ -156,7 +157,7 @@ export const AdminContent: React.FC = () => {
     setStreamTestResult({ status: 'testing', message: 'Testing stream connection...' });
     
     try {
-      const backend = localStorage.getItem('working_backend') || 'https://nexusedu-backend-0bjq.onrender.com';
+      const backend = await getWorkingBackend();
       const response = await fetch(`${backend}/api/stream/${editingItem.id}`, {
         headers: {
           'Range': 'bytes=0-1024'

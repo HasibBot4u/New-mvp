@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useCatalog } from '../../contexts/CatalogContext';
 import { useToast } from '../../components/ui/Toast';
 import { Activity, RefreshCw, Zap, Bug, Database, Settings as SettingsIcon, ShieldAlert, CheckCircle, XCircle } from 'lucide-react';
+import { getWorkingBackend } from '../../lib/api';
 
 interface HealthData {
   status: string;
@@ -29,18 +30,9 @@ export const AdminSystem: React.FC = () => {
     localStorage.getItem('registrations_open') !== 'false'
   );
 
-  const BACKENDS = [
-    'https://nexusedu-backend-0bjq.onrender.com',
-    'https://edbe7e18-233b-4ff5-bed9-83c4e0edd51e-00-25a1ryv2rxe0o.sisko.replit.dev'
-  ];
-
-  const getWorkingBackend = () => {
-    return localStorage.getItem('working_backend') || BACKENDS[0];
-  };
-
   const fetchHealth = async () => {
     try {
-      const backend = getWorkingBackend();
+      const backend = await getWorkingBackend();
       const res = await fetch(`${backend}/api/health`);
       if (res.ok) {
         const data = await res.json();
@@ -74,7 +66,7 @@ export const AdminSystem: React.FC = () => {
   const handleForceWarmup = async () => {
     setIsActionLoading('warmup');
     try {
-      const backend = getWorkingBackend();
+      const backend = await getWorkingBackend();
       const res = await fetch(`${backend}/api/warmup`);
       if (res.ok) {
         showToast('Backend warmup initiated successfully');
@@ -91,7 +83,7 @@ export const AdminSystem: React.FC = () => {
   const handleViewDebug = async () => {
     setIsActionLoading('debug');
     try {
-      const backend = getWorkingBackend();
+      const backend = await getWorkingBackend();
       const res = await fetch(`${backend}/api/debug`);
       if (res.ok) {
         const data = await res.json();

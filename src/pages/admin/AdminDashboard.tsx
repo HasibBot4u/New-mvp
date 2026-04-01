@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import { formatRelativeTime } from '../../lib/utils';
 import { Link } from 'react-router-dom';
+import { getWorkingBackend } from '../../lib/api';
 
 interface HealthStatus {
   status: string;
@@ -99,7 +100,8 @@ export const AdminDashboard: React.FC = () => {
   const fetchHealth = async () => {
     setIsHealthLoading(true);
     try {
-      const response = await fetch('/api/health');
+      const backend = await getWorkingBackend();
+      const response = await fetch(`${backend}/api/health`);
       if (response.ok) {
         const data = await response.json();
         setHealth(data);
@@ -122,7 +124,8 @@ export const AdminDashboard: React.FC = () => {
   const handleForceWarmup = async () => {
     setIsWarmingUp(true);
     try {
-      const response = await fetch('/api/warmup', { method: 'POST' });
+      const backend = await getWorkingBackend();
+      const response = await fetch(`${backend}/api/warmup`, { method: 'POST' });
       if (response.ok) {
         showToast('Warmup initiated successfully');
         fetchHealth();
@@ -269,7 +272,7 @@ export const AdminDashboard: React.FC = () => {
                 </div>
                 <div className="p-4 rounded-lg bg-gray-50 border border-gray-100">
                   <p className="text-xs text-text-secondary mb-1">Catalog Age</p>
-                  <p className="font-medium text-text-primary">{health.catalog_age_minutes.toFixed(1)} mins</p>
+                  <p className="font-medium text-text-primary">{health.catalog_age_minutes?.toFixed(1) || '0.0'} mins</p>
                 </div>
               </div>
             ) : (
