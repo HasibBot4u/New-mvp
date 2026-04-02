@@ -86,10 +86,17 @@ async def get_file_info(channel_id: int, message_id: int) -> Tuple[int, str]:
     """
     msg = await get_message(channel_id, message_id)
     if msg.video:
-        return msg.video.file_size, "video/mp4"
+        mime = msg.video.mime_type or "video/mp4"
+        if "matroska" in mime.lower() or "mkv" in mime.lower():
+            mime = "video/x-matroska"
+        elif "video" not in mime.lower():
+            mime = "video/mp4"
+        return msg.video.file_size, mime
     if msg.document:
         mime = msg.document.mime_type or "video/mp4"
-        if "video" not in mime.lower():
+        if "matroska" in mime.lower() or "mkv" in mime.lower():
+            mime = "video/x-matroska"
+        elif "video" not in mime.lower():
             mime = "video/mp4"
         return msg.document.file_size, mime
     return 0, "video/mp4"
@@ -253,6 +260,10 @@ async def ensure_telegram_connected():
     Called before every stream request and by the watchdog.
     """
     global tg
+    if not SESSION_STRING:
+        print("[NexusEdu] PYROGRAM_SESSION_STRING is not set.")
+        return False
+        
     try:
         if tg is None or not tg.is_connected:
             print("[NexusEdu] Telegram disconnected, reconnecting...")
@@ -289,23 +300,34 @@ async def telegram_watchdog():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global tg
-    print("[NexusEdu] Starting Telegram client...")
-    tg = Client(
-        "nexusedu_session",
-        api_id=API_ID,
-        api_hash=API_HASH,
-        session_string=SESSION_STRING,
-        in_memory=True,
-    )
-    await tg.start()
-    print("[NexusEdu] Telegram client started.")
-    await preload_channels()
-    await resolve_channel(TEST_CHANNEL_ID)
+    if not SESSION_STRING:
+        print("[NexusEdu] WARNING: PYROGRAM_SESSION_STRING is not set. Telegram client will not start.")
+    else:
+        print("[NexusEdu] Starting Telegram client...")
+        try:
+            tg = Client(
+                "nexusedu_session",
+                api_id=API_ID,
+                api_hash=API_HASH,
+                session_string=SESSION_STRING,
+                in_memory=True,
+            )
+            await tg.start()
+            print("[NexusEdu] Telegram client started.")
+            await preload_channels()
+            await resolve_channel(TEST_CHANNEL_ID)
+        except Exception as e:
+            print(f"[NexusEdu] Failed to start Telegram client: {e}")
+            
     await refresh_catalog()
     asyncio.create_task(telegram_watchdog())
     yield
-    print("[NexusEdu] Stopping Telegram client...")
-    await tg.stop()
+    if tg is not None:
+        print("[NexusEdu] Stopping Telegram client...")
+        try:
+            await tg.stop()
+        except Exception:
+            pass
 
 
 # ─── APP ──────────────────────────────────────────────────────
@@ -473,6 +495,10 @@ async def prefetch_video(video_id: str):
     if video_id not in video_map:
         return {"status": "not_found", "cached": False}
 
+    connected = await ensure_telegram_connected()
+    if not connected:
+        return {"status": "error", "cached": False, "error": "Telegram client is not connected"}
+
     info       = video_map[video_id]
     cid_str    = info.get("channel_id", "")
     message_id = info.get("message_id", 0)
@@ -543,20 +569,14 @@ async def stream_video(video_id: str, request: Request):
                 },
             )
         else:
-            # ── First request — return ONLY the first 512KB as HTTP 206 ──
-            # This tells the browser the total file size (so seek bar works),
-            # but only delivers 512KB so playback starts in under 1 second.
-            # The browser then automatically sends Range requests for the rest.
-            initial_end = min(total - 1, INITIAL_BUFFER - 1)
-            length      = initial_end + 1
+            # ── First request without Range header ──
             return StreamingResponse(
-                _stream_telegram(channel_id, message_id, 0, initial_end, total),
-                status_code=206,
+                _stream_telegram(channel_id, message_id, 0, total - 1, total),
+                status_code=200,
                 headers={
                     **CORS_HEADERS,
-                    "Content-Range":  f"bytes 0-{initial_end}/{total}",
                     "Accept-Ranges":  "bytes",
-                    "Content-Length": str(length),
+                    "Content-Length": str(total),
                     "Content-Type":   mime_type,
                 },
             )
@@ -593,15 +613,13 @@ async def test_stream(request: Request):
                 },
             )
         else:
-            initial_end = min(total - 1, INITIAL_BUFFER - 1)
             return StreamingResponse(
-                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID, 0, initial_end, total),
-                status_code=206,
+                _stream_telegram(TEST_CHANNEL_ID, TEST_MESSAGE_ID, 0, total - 1, total),
+                status_code=200,
                 headers={
                     **CORS_HEADERS,
-                    "Content-Range":  f"bytes 0-{initial_end}/{total}",
                     "Accept-Ranges":  "bytes",
-                    "Content-Length": str(str(initial_end + 1)),
+                    "Content-Length": str(total),
                     "Content-Type":   mime_type,
                 },
             )

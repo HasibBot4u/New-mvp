@@ -32,10 +32,17 @@ export const AdminContent: React.FC = () => {
     setIsLoadingQuizzes(true);
     try {
       const { data, error } = await supabase.from('quizzes').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
+      if (error) {
+        if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
+          setQuizzes([]);
+          return;
+        }
+        throw error;
+      }
       setQuizzes(data || []);
     } catch (err) {
       console.error('Error fetching quizzes:', err);
+      setQuizzes([]);
     } finally {
       setIsLoadingQuizzes(false);
     }
@@ -897,7 +904,7 @@ export const AdminContent: React.FC = () => {
                           let items;
                           try {
                             items = JSON.parse(importJson);
-                          } catch (e) {
+                          } catch {
                             throw new Error('Invalid JSON format. Please check for syntax errors.');
                           }
                           

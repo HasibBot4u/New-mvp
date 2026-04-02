@@ -102,7 +102,7 @@ export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheate
     setErrorMessage('Preparing video...');
     let prefetchOk = false;
     
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 6; attempt++) {
       try {
         const prefetchRes = await fetch(
           workingBackend + '/api/prefetch/' + videoId,
@@ -128,6 +128,9 @@ export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheate
             );
             return;
           }
+          if (data.status === 'error') {
+            throw new Error(data.error || 'Prefetch error');
+          }
           prefetchOk = true;
           break;
         }
@@ -135,10 +138,10 @@ export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheate
         console.warn(
           'Prefetch attempt ' + attempt + ' failed:', e
         );
-        if (attempt < 3) {
+        if (attempt < 6) {
           setErrorMessage(
             'Server is waking up... attempt ' + 
-            attempt + '/3'
+            attempt + '/6'
           );
           await new Promise(r => setTimeout(r, 5000));
         }
@@ -147,9 +150,15 @@ export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheate
     
     if (!prefetchOk) {
       console.warn(
-        'All prefetch attempts failed, trying direct stream'
+        'All prefetch attempts failed'
       );
-      // Continue anyway — the stream might still work
+      setIsStarting(false);
+      setHasError(true);
+      setErrorMessage(
+        'Server failed to wake up or Telegram is disconnected. ' +
+        'Please try again later.'
+      );
+      return;
     }
 
     // Step 3: Now set the video src — the message is cached so
@@ -172,11 +181,17 @@ export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheate
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
           if (err.name !== 'AbortError') {
-            console.error('play() rejected:', err);
+            console.error('play() rejected:', err.message || err);
             setIsBuffering(false);
-            // play() rejection is usually autoplay policy, not a real error
-            // Just show the play button again
             setIsPlaying(false);
+            if (err.name === 'NotSupportedError' || err.message?.includes('supported source')) {
+              setHasError(true);
+              setHasStarted(false);
+              setErrorMessage(
+                'Video format not supported or server error. ' +
+                'If this is an MKV or AVI file, your browser cannot play it.'
+              );
+            }
           }
         });
       }
@@ -248,13 +263,25 @@ export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheate
       if (!isStarting) startVideo();
       return;
     }
+    if (isStarting) {
+      // Video is still prefetching, src is not set yet.
+      return;
+    }
     const video = videoRef.current;
     if (video.paused || video.ended) {
       const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise.catch((error) => {
           if (error.name !== 'AbortError') {
-            console.error('play() rejected:', error);
+            console.error('play() rejected:', error.message || error);
+            if (error.name === 'NotSupportedError' || error.message?.includes('supported source')) {
+              setHasError(true);
+              setHasStarted(false);
+              setErrorMessage(
+                'Video format not supported or server error. ' +
+                'If this is an MKV or AVI file, your browser cannot play it.'
+              );
+            }
           }
         });
       }
@@ -551,8 +578,8 @@ export function VideoPlayer({ videoId, sizeMb = 0, isTheaterMode, onToggleTheate
             setHasStarted(false);
             if (errCode === 4) {
               setErrorMessage(
-                'Video format not supported or server returned an error. ' +
-                'Tap Retry — the server may need 30 seconds to warm up.'
+                'Video format not supported or server error. ' +
+                'If this is an MKV or AVI file, your browser cannot play it.'
               );
             } else if (errCode === 2) {
               setErrorMessage(

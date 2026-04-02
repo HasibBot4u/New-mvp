@@ -46,7 +46,7 @@ export const AdminSystem: React.FC = () => {
       } else {
         setHealth(null);
       }
-    } catch (err) {
+    } catch {
       setHealth(null);
     } finally {
       setIsHealthLoading(false);
@@ -144,7 +144,7 @@ export const AdminSystem: React.FC = () => {
     try {
       await refreshCatalog();
       showToast('Catalog cache refreshed successfully');
-    } catch (err) {
+    } catch {
       showToast('Failed to refresh catalog');
     } finally {
       setIsActionLoading(null);
@@ -161,7 +161,7 @@ export const AdminSystem: React.FC = () => {
       } else {
         showToast('Failed to initiate warmup');
       }
-    } catch (err) {
+    } catch {
       showToast('Error connecting to backend');
     } finally {
       setIsActionLoading(null);
@@ -179,14 +179,14 @@ export const AdminSystem: React.FC = () => {
           const data = JSON.parse(text);
           setDebugData(data);
           setShowDebugModal(true);
-        } catch (e) {
+        } catch {
           showToast('Invalid JSON from debug endpoint');
           console.error('Invalid JSON from debug endpoint:', text.substring(0, 100));
         }
       } else {
         showToast('Failed to fetch debug info');
       }
-    } catch (err) {
+    } catch {
       showToast('Error connecting to backend');
     } finally {
       setIsActionLoading(null);

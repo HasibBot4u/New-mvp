@@ -45,7 +45,13 @@ export const AdminQuizQuestions: React.FC<AdminQuizQuestionsProps> = ({ quizId, 
         .eq('quiz_id', quizId)
         .order('display_order', { ascending: true });
         
-      if (questionsError) throw questionsError;
+      if (questionsError) {
+        if (questionsError.code === 'PGRST205' || questionsError.message?.includes('schema cache')) {
+          setQuestions([]);
+          return;
+        }
+        throw questionsError;
+      }
       
       if (questionsData && questionsData.length > 0) {
         const questionIds = questionsData.map(q => q.id);

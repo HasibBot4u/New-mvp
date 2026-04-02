@@ -111,7 +111,7 @@ export const AdminDashboard: React.FC = () => {
         try {
           const data = JSON.parse(text);
           setHealth(data);
-        } catch (e) {
+        } catch {
           console.error('Invalid JSON from health endpoint:', text.substring(0, 100));
         }
       }
@@ -141,7 +141,7 @@ export const AdminDashboard: React.FC = () => {
       } else {
         showToast('Warmup failed');
       }
-    } catch (error) {
+    } catch {
       showToast('Connection error during warmup');
     } finally {
       setIsWarmingUp(false);
@@ -159,14 +159,14 @@ export const AdminDashboard: React.FC = () => {
           const data = JSON.parse(text);
           setDebugData(data);
           setShowDebugModal(true);
-        } catch (e) {
+        } catch {
           showToast('Invalid JSON from debug endpoint');
           console.error('Invalid JSON from debug endpoint:', text.substring(0, 100));
         }
       } else {
         showToast('Failed to fetch debug info');
       }
-    } catch (err) {
+    } catch {
       showToast('Error connecting to backend');
     } finally {
       setIsDebugLoading(false);
@@ -198,7 +198,7 @@ export const AdminDashboard: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       showToast('Users exported successfully');
-    } catch (error) {
+    } catch {
       showToast('Failed to export users');
     }
   };

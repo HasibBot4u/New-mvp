@@ -1,22 +1,21 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Play, Clock, ArrowLeft, CheckCircle } from 'lucide-react';
+import { Play, Clock, ArrowLeft, CheckCircle, HelpCircle } from 'lucide-react';
 import { useCatalog } from '../contexts/CatalogContext';
 import { useVideoProgress } from '../hooks/useVideoProgress';
 import { Breadcrumb } from '../components/ui/Breadcrumb';
 import { Skeleton } from '../components/ui/Skeleton';
 import { api } from '../lib/api';
+import { supabase } from '../lib/supabase';
+import { motion } from 'framer-motion';
 
 export function VideoListPage() {
   const { chapterId } = useParams<{ chapterId: string }>();
   const navigate = useNavigate();
   const { catalog, isLoading } = useCatalog();
   const { isCompleted, getProgress } = useVideoProgress();
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    setVisible(true);
-  }, []);
+  const [quizzes, setQuizzes] = useState<any[]>([]);
+  const [isLoadingQuizzes, setIsLoadingQuizzes] = useState(true);
 
   const data = useMemo(() => {
     if (!catalog || !chapterId) return null;
@@ -49,16 +48,49 @@ export function VideoListPage() {
     });
   }, [videos]);
 
+  useEffect(() => {
+    if (chapterId) {
+      fetchQuizzes();
+    }
+  }, [chapterId]);
+
+  const fetchQuizzes = async () => {
+    setIsLoadingQuizzes(true);
+    try {
+      const { data, error } = await supabase
+        .from('quizzes')
+        .select('*')
+        .eq('chapter_id', chapterId)
+        .eq('is_published', true)
+        .order('created_at', { ascending: true });
+        
+      if (error) {
+        // Ignore missing table error gracefully
+        if (error.code === 'PGRST205' || error.message?.includes('schema cache')) {
+          setQuizzes([]);
+          return;
+        }
+        throw error;
+      }
+      setQuizzes(data || []);
+    } catch (error) {
+      console.error('Error fetching quizzes:', error);
+      setQuizzes([]);
+    } finally {
+      setIsLoadingQuizzes(false);
+    }
+  };
+
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 pb-20">
+      <div className="min-h-screen bg-surface-dark pb-20">
         <div className="h-16 bg-primary" />
         <div className="max-w-4xl mx-auto p-4 space-y-4">
           <Skeleton className="h-8 w-64 mb-6" />
-          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-2xl" />
           <div className="space-y-3 mt-6">
             {Array.from({ length: 10 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full rounded-lg" />
+              <Skeleton key={i} className="h-20 w-full rounded-xl" />
             ))}
           </div>
         </div>
@@ -68,12 +100,12 @@ export function VideoListPage() {
 
   if (!data) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4">
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">Chapter Not Found</h2>
-        <p className="text-gray-600 mb-6">The chapter you are looking for does not exist.</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-surface-dark p-4">
+        <h2 className="text-2xl font-bold text-text-primary mb-2">Chapter Not Found</h2>
+        <p className="text-text-secondary mb-6">The chapter you are looking for does not exist.</p>
         <button 
           onClick={() => navigate('/')}
-          className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+          className="px-6 py-2 bg-primary text-white rounded-xl hover:bg-primary-hover transition-colors"
         >
           Return Home
         </button>
@@ -87,7 +119,12 @@ export function VideoListPage() {
   const progressPercent = videos.length > 0 ? Math.round((completedCount / videos.length) * 100) : 0;
 
   return (
-    <div className={`min-h-screen bg-gray-50 pb-20 transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="min-h-screen bg-surface-dark pb-20"
+    >
       <header className="bg-primary text-white h-16 flex items-center px-4 sticky top-0 z-30 shadow-md">
         <button 
           onClick={() => navigate(-1)}
@@ -95,10 +132,10 @@ export function VideoListPage() {
         >
           <ArrowLeft className="w-6 h-6" />
         </button>
-        <h1 className="text-lg font-medium truncate">{chapter.name}</h1>
+        <h1 className="text-lg font-medium truncate" style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>{chapter.name}</h1>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-6">
+      <main className="max-w-4xl mx-auto px-4 py-8">
         <Breadcrumb items={[
           { label: 'Home', href: '/' },
           { label: subject.name, href: `/subject/${subject.id}` },
@@ -106,13 +143,13 @@ export function VideoListPage() {
           { label: chapter.name }
         ]} />
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">{chapter.name}</h1>
-          <p className="text-gray-600 mb-6">{subject.name} • {cycle.name}</p>
+        <div className="bg-white rounded-2xl shadow-sm border border-border p-6 mb-8 mt-4">
+          <h1 className="text-2xl font-bold text-text-primary mb-2" style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>{chapter.name}</h1>
+          <p className="text-text-secondary mb-6" style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>{subject.name} • {cycle.name}</p>
           
-          <div className="flex items-center justify-between text-sm font-medium text-gray-700 mb-2">
-            <span>Progress</span>
-            <span>{completedCount} of {videos.length} videos completed</span>
+          <div className="flex items-center justify-between text-sm font-medium text-text-secondary mb-2">
+            <span style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>প্রগ্রেস</span>
+            <span style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>{completedCount} / {videos.length} ভিডিও সম্পন্ন</span>
           </div>
           <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
             <div 
@@ -122,53 +159,75 @@ export function VideoListPage() {
           </div>
         </div>
 
-        <div className="space-y-3">
-          {videos.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-xl border border-gray-100">
-              <p className="text-gray-500 font-medium">No videos available in this chapter yet.</p>
+        <div className="space-y-4">
+          {videos.length === 0 && quizzes.length === 0 ? (
+            <div className="text-center py-16 bg-white rounded-2xl border border-border shadow-sm">
+              <p className="text-text-secondary font-medium" style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>এই চ্যাপ্টারে এখনো কোনো কন্টেন্ট যোগ করা হয়নি।</p>
             </div>
           ) : (
-            videos.map((video: any, index: number) => {
-              const isDone = isCompleted(video.id);
-              const progress = getProgress(video.id);
-              const hasProgress = progress > 10 && !isDone;
+            <>
+              {videos.map((video: any, index: number) => {
+                const isDone = isCompleted(video.id);
+                const progress = getProgress(video.id);
+                const hasProgress = progress > 10 && !isDone;
 
-              return (
-                <Link
-                  key={video.id}
-                  to={`/watch/${video.id}`}
-                  className="group flex items-center p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:border-primary/30 hover:shadow-md transition-all duration-150 transform hover:-translate-y-0.5"
-                >
-                  <div className="w-10 text-center text-gray-400 font-medium mr-4">
-                    {(index + 1).toString().padStart(2, '0')}
-                  </div>
-                  
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 mr-4 transition-colors ${
-                    isDone ? 'bg-success/10 text-success' : 'bg-primary/10 text-primary group-hover:bg-primary group-hover:text-white'
-                  }`}>
-                    {isDone ? <CheckCircle className="w-6 h-6" /> : <Play className="w-5 h-5 ml-1" />}
-                  </div>
-                  
-                  <div className="flex-1 min-w-0 pr-4">
-                    <h3 className={`font-medium truncate mb-1 ${isDone ? 'text-success' : 'text-gray-900'}`}>
-                      {video.title}
-                    </h3>
-                    <div className="flex items-center text-sm text-gray-500">
-                      <Clock className="w-4 h-4 mr-1.5" />
-                      {video.duration}
-                      {hasProgress && (
-                        <span className="ml-3 px-2 py-0.5 bg-primary/10 text-primary rounded text-xs font-semibold">
-                          Continue
-                        </span>
-                      )}
+                return (
+                  <Link
+                    key={video.id}
+                    to={`/watch/${video.id}`}
+                    className="group flex flex-col bg-white rounded-xl shadow-sm border border-border hover:border-primary/30 hover:shadow-md transition-all duration-200 overflow-hidden"
+                  >
+                    <div className="flex items-center p-4">
+                      <div className="w-10 h-10 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center text-text-secondary font-bold mr-4 group-hover:bg-primary/5 group-hover:text-primary transition-colors">
+                        {(index + 1).toString().padStart(2, '0')}
+                      </div>
+                      
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 mr-4 transition-colors ${
+                        isDone ? 'bg-success/10 text-success' : 'bg-primary/10 text-primary group-hover:bg-primary group-hover:text-white'
+                      }`}>
+                        {isDone ? <CheckCircle className="w-5 h-5" /> : <Play className="w-4 h-4 ml-0.5" />}
+                      </div>
+                      
+                      <div className="flex-1 min-w-0 pr-4">
+                        <h3 className={`font-semibold truncate mb-1 ${isDone ? 'text-success' : 'text-text-primary group-hover:text-primary transition-colors'}`} style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>
+                          {video.title}
+                        </h3>
+                        <div className="flex items-center text-sm text-text-secondary">
+                          <Clock className="w-3.5 h-3.5 mr-1.5" />
+                          {video.duration}
+                          {hasProgress && (
+                            <span className="ml-3 px-2 py-0.5 bg-accent/10 text-accent rounded text-xs font-bold" style={{ fontFamily: 'Hind Siliguri, sans-serif' }}>
+                              চলমান
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </Link>
-              );
-            })
+                    {hasProgress && (
+                      <div className="w-full h-1 bg-gray-100">
+                        <div className="h-full bg-accent" style={{ width: `${Math.min(100, (progress / 100) * 100)}%` }} />
+                      </div>
+                    )}
+                  </Link>
+                );
+              })}
+
+              {!isLoadingQuizzes && quizzes.length > 0 && (
+                <div className="mt-8 pt-6 border-t border-border">
+                  <Link
+                    to={`/chapter/${chapterId}/quizzes`}
+                    className="flex items-center justify-center w-full py-4 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl font-bold transition-colors"
+                    style={{ fontFamily: 'Hind Siliguri, sans-serif' }}
+                  >
+                    <HelpCircle className="w-5 h-5 mr-2" />
+                    এই অধ্যায়ের MCQ দাও
+                  </Link>
+                </div>
+              )}
+            </>
           )}
         </div>
       </main>
-    </div>
+    </motion.div>
   );
 }

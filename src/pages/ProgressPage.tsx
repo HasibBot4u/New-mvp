@@ -168,7 +168,8 @@ export function ProgressPage() {
             </h2>
             <div className="flex overflow-x-auto space-x-4 pb-4 scrollbar-hide snap-x">
               {continueWatching.map((item) => {
-                const timeParts = item.video.duration.split(':').map(Number);
+                const durationStr = item.video.duration || '00:00:00';
+                const timeParts = durationStr.split(':').map(Number);
                 let durationSecs = 0;
                 if (timeParts.length === 3) durationSecs = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2];
                 else if (timeParts.length === 2) durationSecs = timeParts[0] * 60 + timeParts[1];

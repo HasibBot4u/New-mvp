@@ -605,7 +605,7 @@ export const AdminUsers: React.FC = () => {
                     if (error) throw error;
                     setUsers(users.filter(u => u.id !== userToDelete.id));
                     showToast('User deleted successfully');
-                  } catch (err) {
+                  } catch {
                     showToast('Failed to delete user');
                   }
                   setUserToDelete(null);

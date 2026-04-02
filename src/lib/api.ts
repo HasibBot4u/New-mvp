@@ -11,7 +11,7 @@ export async function getWorkingBackend(): Promise<string> {
     try {
       const response = await fetch(`${cachedBackend}/`, { method: 'GET' });
       if (response.ok) return cachedBackend;
-    } catch (e) {
+    } catch {
       // Cached backend failed, fall through to check both
     }
   }
@@ -23,7 +23,7 @@ export async function getWorkingBackend(): Promise<string> {
       localStorage.setItem('working_backend', PRIMARY_BACKEND);
       return PRIMARY_BACKEND;
     }
-  } catch (e) {
+  } catch {
     console.warn('Primary backend failed, trying secondary...');
   }
 
@@ -34,7 +34,7 @@ export async function getWorkingBackend(): Promise<string> {
       localStorage.setItem('working_backend', SECONDARY_BACKEND);
       return SECONDARY_BACKEND;
     }
-  } catch (e) {
+  } catch {
     console.error('Both backends failed');
   }
 

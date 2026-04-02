@@ -7,18 +7,19 @@ export default {
       colors: {
         primary: {
           DEFAULT: '#1A237E',
-          light: '#1565C0',
-          lighter: '#1976D2',
-          pale: '#E8EAF6',
-          hover: '#1565C0'
+          light: '#283593',
+          lighter: '#3949AB',
+          dark: '#0D1657',
+          hover: '#283593',
         },
         secondary: {
           DEFAULT: '#E8EAF6',
           hover: '#C5CAE9'
         },
         accent: {
-          DEFAULT: '#E53935',
-          light: '#FFEBEE'
+          DEFAULT: '#00C853',
+          dark: '#00A846',
+          light: '#E8F5E9',
         },
         success: {
           DEFAULT: '#2E7D32',
@@ -31,25 +32,28 @@ export default {
         background: '#F5F7FA',
         surface: {
           DEFAULT: '#FFFFFF',
+          dark: '#F5F7FA',
+          card: '#FFFFFF',
           hover: '#EEF2FF'
         },
         border: '#E0E7EF',
         text: {
-          primary: '#0D1B2A',
+          primary: '#1A1A2E',
           secondary: '#546E7A',
-          muted: '#94A3B8'
+          muted: '#90A4AE',
+          inverse: '#FFFFFF',
         },
         brand: {
           bg: '#F5F7FA',
           surface: '#FFFFFF',
           hover: '#EEF2FF',
           border: '#E0E7EF',
-          text: '#0D1B2A',
+          text: '#1A1A2E',
           muted: '#546E7A'
         }
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif']
+        sans: ['Inter', 'Hind Siliguri', 'sans-serif']
       },
       boxShadow: {
         card: '0 2px 8px rgba(0,0,0,0.07)',

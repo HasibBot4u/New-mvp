@@ -5,6 +5,7 @@ import { CatalogProvider } from './contexts/CatalogContext';
 import { ToastProvider } from './components/ui/Toast';
 import { BottomNav } from './components/layout/BottomNav';
 import { HomePage } from './pages/HomePage';
+import { LandingPage } from './pages/LandingPage';
 import { SearchPage } from './pages/SearchPage';
 import { SubjectsPage } from './pages/SubjectsPage';
 import { CyclesPage } from './pages/CyclesPage';
@@ -15,12 +16,16 @@ import { LoginPage } from './pages/LoginPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ProgressPage } from './pages/ProgressPage';
 import { NotesPage } from './pages/NotesPage';
+import { QuizPage } from './pages/QuizPage';
+import { QuizListPage } from './pages/QuizListPage';
+import { QuizResultPage } from './pages/QuizResultPage';
+import { LeaderboardPage } from './pages/LeaderboardPage';
+import { ShopPage, AboutPage, SuccessStoriesPage, ContactPage, PrivacyPage, TermsPage, RefundPage } from './pages/Placeholders';
 import { AdminLayout } from './pages/admin/AdminLayout';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminContent } from './pages/admin/AdminContent';
 import { AdminUsers } from './pages/admin/AdminUsers';
 import { AdminLogs } from './pages/admin/AdminLogs';
-
 import { AdminSystem } from './pages/admin/AdminSystem';
 
 const ProtectedRoute: React.FC<{ 
@@ -57,6 +62,18 @@ const ProtectedRoute: React.FC<{
   return <>{children}</>;
 };
 
+const PublicOrDashboard: React.FC = () => {
+  const { user, isLoading } = useAuth();
+  
+  if (isLoading) return null;
+  
+  if (user) {
+    return <HomePage />;
+  }
+  
+  return <LandingPage />;
+};
+
 const AppContent: React.FC = () => {
   return (
     <div className="min-h-screen bg-background text-text-primary flex flex-col">
@@ -64,13 +81,28 @@ const AppContent: React.FC = () => {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           
-          <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+          <Route path="/" element={<PublicOrDashboard />} />
+          <Route path="/courses" element={<PublicOrDashboard />} />
+          
+          {/* Public Pages */}
+          <Route path="/shop" element={<ShopPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/success" element={<SuccessStoriesPage />} />
+          <Route path="/contact" element={<ContactPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/refund" element={<RefundPage />} />
+
           <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
           <Route path="/subjects" element={<ProtectedRoute><SubjectsPage /></ProtectedRoute>} />
           <Route path="/subject/:subjectId" element={<ProtectedRoute><CyclesPage /></ProtectedRoute>} />
           <Route path="/cycle/:cycleId" element={<ProtectedRoute><ChaptersPage /></ProtectedRoute>} />
           <Route path="/chapter/:chapterId" element={<ProtectedRoute><VideoListPage /></ProtectedRoute>} />
           <Route path="/watch/:videoId" element={<ProtectedRoute><PlayerPage /></ProtectedRoute>} />
+          <Route path="/chapter/:chapterId/quizzes" element={<ProtectedRoute><QuizListPage /></ProtectedRoute>} />
+          <Route path="/quiz/:quizId" element={<ProtectedRoute><QuizPage /></ProtectedRoute>} />
+          <Route path="/quiz/:quizId/result/:attemptId" element={<ProtectedRoute><QuizResultPage /></ProtectedRoute>} />
+          <Route path="/leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
           <Route path="/progress" element={<ProtectedRoute><ProgressPage /></ProtectedRoute>} />
           <Route path="/notes" element={<ProtectedRoute><NotesPage /></ProtectedRoute>} />
